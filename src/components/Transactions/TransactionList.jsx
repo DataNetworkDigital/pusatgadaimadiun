@@ -140,7 +140,7 @@ export default function TransactionList() {
         +
       </button>
 
-      <TransactionForm open={formOpen} onClose={() => setFormOpen(false)} initial={editing} />
+      <TransactionForm key={editing?.id || 'new'} open={formOpen} onClose={() => setFormOpen(false)} initial={editing} />
       <TransactionDetail tx={detail} accounts={accounts} open={!!detail} onClose={() => setDetail(null)} onEdit={handleEdit} onDelete={handleDeleteRequest} />
       <ConfirmDialog
         open={!!deleting}

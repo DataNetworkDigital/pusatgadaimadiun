@@ -5,6 +5,7 @@ import CalendarGrid from './CalendarGrid';
 import DayDetail from './DayDetail';
 import ReminderForm from './ReminderForm';
 import TransactionDetail from '../Transactions/TransactionDetail';
+import TransactionForm from '../Transactions/TransactionForm';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { monthLabel } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -20,6 +21,7 @@ export default function CalendarPage() {
   const [editingRem, setEditingRem] = useState(null);
   const [delRem, setDelRem] = useState(null);
   const [txDetail, setTxDetail] = useState(null);
+  const [editingTx, setEditingTx] = useState(null);
   const [delTx, setDelTx] = useState(null);
 
   function prev() {
@@ -93,15 +95,16 @@ export default function CalendarPage() {
         </div>
       )}
 
-      <ReminderForm open={remOpen} onClose={() => setRemOpen(false)} onSubmit={handleSubmitRem} initial={editingRem} />
+      <ReminderForm key={`rem-${editingRem?.id || 'new'}`} open={remOpen} onClose={() => setRemOpen(false)} onSubmit={handleSubmitRem} initial={editingRem} />
       <TransactionDetail
         tx={txDetail}
         accounts={accounts}
         open={!!txDetail}
         onClose={() => setTxDetail(null)}
-        onEdit={() => setTxDetail(null)}
+        onEdit={(t) => { setTxDetail(null); setEditingTx(t); }}
         onDelete={(t) => { setTxDetail(null); setDelTx(t); }}
       />
+      <TransactionForm key={`tx-${editingTx?.id || 'new'}`} open={!!editingTx} onClose={() => setEditingTx(null)} initial={editingTx} />
       <ConfirmDialog
         open={!!delRem}
         onClose={() => setDelRem(null)}

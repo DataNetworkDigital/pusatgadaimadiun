@@ -77,7 +77,7 @@ export default function DebtList() {
         </div>
       )}
 
-      <DebtForm open={formOpen} onClose={() => setFormOpen(false)} onSubmit={handleSubmit} initial={editing} defaultType={tab} />
+      <DebtForm key={editing?.id || 'new'} open={formOpen} onClose={() => setFormOpen(false)} onSubmit={handleSubmit} initial={editing} defaultType={tab} />
       <InstallmentForm open={!!paying} onClose={() => setPaying(null)} debt={paying} />
       <ConfirmDialog
         open={!!deleting}

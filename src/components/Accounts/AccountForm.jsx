@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Modal from '../common/Modal';
 import CurrencyInput from '../common/CurrencyInput';
 
@@ -6,18 +6,29 @@ const DEFAULT_BANKS = ['BCA', 'BRI', 'BNI', 'Mandiri', 'BSI', 'CIMB Niaga', 'Per
 
 export default function AccountForm({ open, onClose, onSubmit, initial }) {
   const isEdit = !!initial;
-  const [bankSelect, setBankSelect] = useState(() => {
-    if (!initial) return '';
-    return DEFAULT_BANKS.includes(initial.name) ? initial.name : 'Lainnya';
-  });
-  const [customName, setCustomName] = useState(() => {
-    if (!initial) return '';
-    return DEFAULT_BANKS.includes(initial.name) ? '' : initial.name;
-  });
-  const [accountNumber, setAccountNumber] = useState(initial?.accountNumber || '');
-  const [balance, setBalance] = useState(initial?.balance || 0);
+  const [bankSelect, setBankSelect] = useState('');
+  const [customName, setCustomName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [balance, setBalance] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    if (initial) {
+      const known = DEFAULT_BANKS.includes(initial.name);
+      setBankSelect(known ? initial.name : 'Lainnya');
+      setCustomName(known ? '' : initial.name);
+      setAccountNumber(initial.accountNumber || '');
+      setBalance(initial.balance || 0);
+    } else {
+      setBankSelect('');
+      setCustomName('');
+      setAccountNumber('');
+      setBalance(0);
+    }
+    setError('');
+  }, [open, initial]);
 
   async function handleSubmit(e) {
     e.preventDefault();

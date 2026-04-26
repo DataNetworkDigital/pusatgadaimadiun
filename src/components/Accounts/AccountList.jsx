@@ -66,6 +66,7 @@ export default function AccountList() {
       )}
 
       <AccountForm
+        key={editing?.id || 'new'}
         open={formOpen}
         onClose={() => setFormOpen(false)}
         onSubmit={handleSubmit}
