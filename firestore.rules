@@ -1,38 +1,33 @@
 rules_version = '2';
 
-// Pusat Gadai Madiun — single-tenant PIN-protected app.
-// Aplikasi tidak menggunakan Firebase Auth; PIN diverifikasi di client
-// terhadap config/settings.pinHash. Rules berikut TIDAK pernah expire,
-// dan membatasi akses hanya ke koleksi yang dipakai aplikasi serta
-// memvalidasi shape data di sisi server.
+// Pusat Gadai Madiun — single-tenant PIN-protected app dengan
+// Firebase Anonymous Auth sebagai gerbang pertama. PIN tetap
+// diverifikasi di client terhadap config/settings.pinHash.
+//
+// Rules ini TIDAK pernah expire (tidak pakai timestamp check) dan
+// hanya mengizinkan request yang memiliki Auth token.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function signedIn() {
+      return request.auth != null;
+    }
+
     match /config/settings {
-      allow read: if true;
-      allow create: if !exists(/databases/$(database)/documents/config/settings);
-      allow update: if request.resource.data.keys().hasOnly(['pinHash', 'createdAt', 'updatedAt'])
+      allow read: if signedIn();
+      allow create: if signedIn() && !exists(/databases/$(database)/documents/config/settings);
+      allow update: if signedIn()
+                    && request.resource.data.keys().hasOnly(['pinHash', 'createdAt', 'updatedAt'])
                     && request.resource.data.pinHash is string
                     && request.resource.data.pinHash.size() == 64;
       allow delete: if false;
     }
 
-    match /accounts/{id} {
-      allow read, write: if true;
-    }
-
-    match /transactions/{id} {
-      allow read, write: if true;
-    }
-
-    match /debts/{id} {
-      allow read, write: if true;
-    }
-
-    match /reminders/{id} {
-      allow read, write: if true;
-    }
+    match /accounts/{id}      { allow read, write: if signedIn(); }
+    match /transactions/{id}  { allow read, write: if signedIn(); }
+    match /debts/{id}         { allow read, write: if signedIn(); }
+    match /reminders/{id}     { allow read, write: if signedIn(); }
 
     match /{document=**} {
       allow read, write: if false;

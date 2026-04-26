@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, authReady } from '../firebase';
 import { hashPin, verifyPin } from '../utils/hashPin';
 
 const AuthContext = createContext(null);
@@ -13,7 +13,14 @@ export function AuthProvider({ children }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    initSettings().finally(() => setLoading(false));
+    (async () => {
+      try {
+        await authReady;
+        await initSettings();
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   async function initSettings() {
