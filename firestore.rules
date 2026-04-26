@@ -1,0 +1,41 @@
+rules_version = '2';
+
+// Pusat Gadai Madiun — single-tenant PIN-protected app.
+// Aplikasi tidak menggunakan Firebase Auth; PIN diverifikasi di client
+// terhadap config/settings.pinHash. Rules berikut TIDAK pernah expire,
+// dan membatasi akses hanya ke koleksi yang dipakai aplikasi serta
+// memvalidasi shape data di sisi server.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /config/settings {
+      allow read: if true;
+      allow create: if !exists(/databases/$(database)/documents/config/settings);
+      allow update: if request.resource.data.keys().hasOnly(['pinHash', 'createdAt', 'updatedAt'])
+                    && request.resource.data.pinHash is string
+                    && request.resource.data.pinHash.size() == 64;
+      allow delete: if false;
+    }
+
+    match /accounts/{id} {
+      allow read, write: if true;
+    }
+
+    match /transactions/{id} {
+      allow read, write: if true;
+    }
+
+    match /debts/{id} {
+      allow read, write: if true;
+    }
+
+    match /reminders/{id} {
+      allow read, write: if true;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

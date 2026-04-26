@@ -19,19 +19,27 @@ export function DataProvider({ children }) {
   useEffect(() => {
     if (!isUnlocked) return;
     setLoading(true);
+    const loaded = { a: false, t: false, d: false, r: false };
+    const markLoaded = (k) => {
+      loaded[k] = true;
+      if (loaded.a && loaded.t && loaded.d && loaded.r) setLoading(false);
+    };
 
     const unsubA = onSnapshot(query(collection(db, 'accounts'), orderBy('createdAt', 'asc')), (snap) => {
       setAccounts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      markLoaded('a');
     });
     const unsubT = onSnapshot(query(collection(db, 'transactions'), orderBy('date', 'desc')), (snap) => {
       setTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      markLoaded('t');
     });
     const unsubD = onSnapshot(query(collection(db, 'debts'), orderBy('createdAt', 'desc')), (snap) => {
       setDebts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      markLoaded('d');
     });
     const unsubR = onSnapshot(query(collection(db, 'reminders'), orderBy('createdAt', 'desc')), (snap) => {
       setReminders(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setLoading(false);
+      markLoaded('r');
     });
 
     return () => { unsubA(); unsubT(); unsubD(); unsubR(); };
@@ -103,6 +111,20 @@ export function DataProvider({ children }) {
       batch.update(doc(db, 'accounts', tx.fromAccount), { balance: increment(amt), updatedAt: serverTimestamp() });
       batch.update(doc(db, 'accounts', tx.toAccount), { balance: increment(-amt), updatedAt: serverTimestamp() });
     }
+    if (tx.debtId) {
+      const debt = debts.find((d) => d.id === tx.debtId);
+      if (debt) {
+        const newRemaining = Number(debt.remainingAmount) + amt;
+        const newInstallments = (debt.installments || []).filter((ins) => ins.transactionId !== id);
+        const total = Number(debt.totalAmount) || 0;
+        const newStatus = newRemaining >= total ? 'unpaid' : newInstallments.length > 0 ? 'partial' : 'unpaid';
+        batch.update(doc(db, 'debts', tx.debtId), {
+          remainingAmount: newRemaining,
+          installments: newInstallments,
+          status: newStatus,
+        });
+      }
+    }
     batch.delete(doc(db, 'transactions', id));
     await batch.commit();
   }
@@ -138,6 +160,23 @@ export function DataProvider({ children }) {
       fromAccount: newData.fromAccount || null,
       toAccount: newData.toAccount || null,
     });
+    if (old.debtId) {
+      const debt = debts.find((d) => d.id === old.debtId);
+      if (debt) {
+        const reverted = Number(debt.remainingAmount) + Number(old.amount);
+        const newRemaining = reverted - newAmt;
+        const installments = (debt.installments || []).map((ins) =>
+          ins.transactionId === id ? { ...ins, amount: newAmt } : ins
+        );
+        const total = Number(debt.totalAmount) || 0;
+        const newStatus = newRemaining <= 0 ? 'paid' : newRemaining >= total ? 'unpaid' : 'partial';
+        batch.update(doc(db, 'debts', old.debtId), {
+          remainingAmount: newRemaining,
+          installments,
+          status: newStatus,
+        });
+      }
+    }
     await batch.commit();
   }
 
@@ -163,6 +202,7 @@ export function DataProvider({ children }) {
     if (data.personName !== undefined) update.personName = data.personName;
     if (data.totalAmount !== undefined) update.totalAmount = Number(data.totalAmount);
     if (data.remainingAmount !== undefined) update.remainingAmount = Number(data.remainingAmount);
+    if (data.startDate !== undefined) update.startDate = data.startDate instanceof Date ? Timestamp.fromDate(data.startDate) : data.startDate;
     if (data.dueDate !== undefined) update.dueDate = data.dueDate instanceof Date ? Timestamp.fromDate(data.dueDate) : data.dueDate;
     if (data.description !== undefined) update.description = data.description;
     if (data.status !== undefined) update.status = data.status;
@@ -179,27 +219,40 @@ export function DataProvider({ children }) {
     const amt = Number(amount);
     if (amt <= 0) throw new Error('Jumlah harus lebih dari 0');
     if (amt > debt.remainingAmount) throw new Error('Jumlah melebihi sisa');
+    if (!accountId) throw new Error('Pilih rekening');
 
     const txType = debt.type === 'utang' ? 'expense' : 'income';
-    const txData = {
+    const now = new Date();
+    const batch = writeBatch(db);
+    const txRef = doc(collection(db, 'transactions'));
+
+    batch.set(txRef, {
       type: txType,
       amount: amt,
       description: `${debt.type === 'utang' ? 'Bayar utang' : 'Terima piutang'} ke/dari ${debt.personName}`,
-      date: new Date(),
+      date: Timestamp.fromDate(now),
       fromAccount: txType === 'expense' ? accountId : null,
       toAccount: txType === 'income' ? accountId : null,
       debtId,
-    };
-    const txId = await addTransaction(txData);
+      createdAt: serverTimestamp(),
+    });
+
+    if (txType === 'expense') {
+      batch.update(doc(db, 'accounts', accountId), { balance: increment(-amt), updatedAt: serverTimestamp() });
+    } else {
+      batch.update(doc(db, 'accounts', accountId), { balance: increment(amt), updatedAt: serverTimestamp() });
+    }
 
     const newRemaining = debt.remainingAmount - amt;
     const newStatus = newRemaining <= 0 ? 'paid' : 'partial';
-    const installment = { amount: amt, date: Timestamp.fromDate(new Date()), transactionId: txId };
-    await updateDoc(doc(db, 'debts', debtId), {
+    const installment = { amount: amt, date: Timestamp.fromDate(now), transactionId: txRef.id };
+    batch.update(doc(db, 'debts', debtId), {
       remainingAmount: newRemaining,
       status: newStatus,
       installments: [...(debt.installments || []), installment],
     });
+
+    await batch.commit();
   }
 
   // ===== Reminders =====

@@ -15,7 +15,6 @@ export default function DashboardPage() {
     const start = startOfMonth(now);
     const end = endOfMonth(now);
     let inc = 0, exp = 0;
-    const dailyData = {};
     transactions.forEach((tx) => {
       const d = toDate(tx.date);
       if (!d || d < start || d > end) return;

@@ -17,7 +17,8 @@ export default function InstallmentForm({ open, onClose, debt }) {
       setAccountId(accounts[0]?.id || '');
       setError('');
     }
-  }, [open, accounts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!debt) return null;
   const action = debt.type === 'utang' ? 'Bayar Cicilan' : 'Terima Cicilan';

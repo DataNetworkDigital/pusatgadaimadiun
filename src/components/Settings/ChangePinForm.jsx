@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Modal from '../common/Modal';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -10,6 +10,13 @@ export default function ChangePinForm({ open, onClose }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setOldPin(''); setNewPin(''); setConfirmPin('');
+      setError(''); setSuccess('');
+    }
+  }, [open]);
 
   async function handleSubmit(e) {
     e.preventDefault();
