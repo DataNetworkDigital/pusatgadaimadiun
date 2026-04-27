@@ -5,11 +5,14 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from './AuthContext';
+import { useDemo } from './DemoContext';
 
 const DataContext = createContext(null);
 
 export function DataProvider({ children }) {
   const { isUnlocked } = useAuth();
+  const { collectionPrefix, isDemo } = useDemo();
+  const C = (name) => `${collectionPrefix}${name}`;
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [debts, setDebts] = useState([]);
@@ -17,7 +20,7 @@ export function DataProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!isUnlocked) return;
+    if (!isDemo && !isUnlocked) return;
     setLoading(true);
     const loaded = { a: false, t: false, d: false, r: false };
     const markLoaded = (k) => {
@@ -25,29 +28,30 @@ export function DataProvider({ children }) {
       if (loaded.a && loaded.t && loaded.d && loaded.r) setLoading(false);
     };
 
-    const unsubA = onSnapshot(query(collection(db, 'accounts'), orderBy('createdAt', 'asc')), (snap) => {
+    const unsubA = onSnapshot(query(collection(db, C('accounts')), orderBy('createdAt', 'asc')), (snap) => {
       setAccounts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       markLoaded('a');
     });
-    const unsubT = onSnapshot(query(collection(db, 'transactions'), orderBy('date', 'desc')), (snap) => {
+    const unsubT = onSnapshot(query(collection(db, C('transactions')), orderBy('date', 'desc')), (snap) => {
       setTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       markLoaded('t');
     });
-    const unsubD = onSnapshot(query(collection(db, 'debts'), orderBy('createdAt', 'desc')), (snap) => {
+    const unsubD = onSnapshot(query(collection(db, C('debts')), orderBy('createdAt', 'desc')), (snap) => {
       setDebts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       markLoaded('d');
     });
-    const unsubR = onSnapshot(query(collection(db, 'reminders'), orderBy('createdAt', 'desc')), (snap) => {
+    const unsubR = onSnapshot(query(collection(db, C('reminders')), orderBy('createdAt', 'desc')), (snap) => {
       setReminders(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       markLoaded('r');
     });
 
     return () => { unsubA(); unsubT(); unsubD(); unsubR(); };
-  }, [isUnlocked]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isUnlocked, isDemo, collectionPrefix]);
 
   // ===== Accounts =====
   async function addAccount(data) {
-    return addDoc(collection(db, 'accounts'), {
+    return addDoc(collection(db, C('accounts')), {
       name: data.name,
       accountNumber: data.accountNumber || '',
       balance: Number(data.balance) || 0,
@@ -61,17 +65,17 @@ export function DataProvider({ children }) {
     if (data.name !== undefined) update.name = data.name;
     if (data.accountNumber !== undefined) update.accountNumber = data.accountNumber;
     if (data.balance !== undefined) update.balance = Number(data.balance);
-    return updateDoc(doc(db, 'accounts', id), update);
+    return updateDoc(doc(db, C('accounts'), id), update);
   }
 
   async function deleteAccount(id) {
-    return deleteDoc(doc(db, 'accounts', id));
+    return deleteDoc(doc(db, C('accounts'), id));
   }
 
   // ===== Transactions =====
   async function addTransaction(data) {
     const batch = writeBatch(db);
-    const txRef = doc(collection(db, 'transactions'));
+    const txRef = doc(collection(db, C('transactions')));
     const date = data.date instanceof Date ? Timestamp.fromDate(data.date) : data.date;
 
     batch.set(txRef, {
@@ -87,12 +91,12 @@ export function DataProvider({ children }) {
 
     const amt = Number(data.amount);
     if (data.type === 'income' && data.toAccount) {
-      batch.update(doc(db, 'accounts', data.toAccount), { balance: increment(amt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), data.toAccount), { balance: increment(amt), updatedAt: serverTimestamp() });
     } else if (data.type === 'expense' && data.fromAccount) {
-      batch.update(doc(db, 'accounts', data.fromAccount), { balance: increment(-amt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), data.fromAccount), { balance: increment(-amt), updatedAt: serverTimestamp() });
     } else if (data.type === 'transfer' && data.fromAccount && data.toAccount) {
-      batch.update(doc(db, 'accounts', data.fromAccount), { balance: increment(-amt), updatedAt: serverTimestamp() });
-      batch.update(doc(db, 'accounts', data.toAccount), { balance: increment(amt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), data.fromAccount), { balance: increment(-amt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), data.toAccount), { balance: increment(amt), updatedAt: serverTimestamp() });
     }
     await batch.commit();
     return txRef.id;
@@ -104,12 +108,12 @@ export function DataProvider({ children }) {
     const batch = writeBatch(db);
     const amt = Number(tx.amount);
     if (tx.type === 'income' && tx.toAccount) {
-      batch.update(doc(db, 'accounts', tx.toAccount), { balance: increment(-amt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), tx.toAccount), { balance: increment(-amt), updatedAt: serverTimestamp() });
     } else if (tx.type === 'expense' && tx.fromAccount) {
-      batch.update(doc(db, 'accounts', tx.fromAccount), { balance: increment(amt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), tx.fromAccount), { balance: increment(amt), updatedAt: serverTimestamp() });
     } else if (tx.type === 'transfer' && tx.fromAccount && tx.toAccount) {
-      batch.update(doc(db, 'accounts', tx.fromAccount), { balance: increment(amt), updatedAt: serverTimestamp() });
-      batch.update(doc(db, 'accounts', tx.toAccount), { balance: increment(-amt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), tx.fromAccount), { balance: increment(amt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), tx.toAccount), { balance: increment(-amt), updatedAt: serverTimestamp() });
     }
     if (tx.debtId) {
       const debt = debts.find((d) => d.id === tx.debtId);
@@ -118,14 +122,14 @@ export function DataProvider({ children }) {
         const newInstallments = (debt.installments || []).filter((ins) => ins.transactionId !== id);
         const total = Number(debt.totalAmount) || 0;
         const newStatus = newRemaining >= total ? 'unpaid' : newInstallments.length > 0 ? 'partial' : 'unpaid';
-        batch.update(doc(db, 'debts', tx.debtId), {
+        batch.update(doc(db, C('debts'), tx.debtId), {
           remainingAmount: newRemaining,
           installments: newInstallments,
           status: newStatus,
         });
       }
     }
-    batch.delete(doc(db, 'transactions', id));
+    batch.delete(doc(db, C('transactions'), id));
     await batch.commit();
   }
 
@@ -135,24 +139,24 @@ export function DataProvider({ children }) {
     const batch = writeBatch(db);
     const oldAmt = Number(old.amount);
     if (old.type === 'income' && old.toAccount) {
-      batch.update(doc(db, 'accounts', old.toAccount), { balance: increment(-oldAmt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), old.toAccount), { balance: increment(-oldAmt), updatedAt: serverTimestamp() });
     } else if (old.type === 'expense' && old.fromAccount) {
-      batch.update(doc(db, 'accounts', old.fromAccount), { balance: increment(oldAmt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), old.fromAccount), { balance: increment(oldAmt), updatedAt: serverTimestamp() });
     } else if (old.type === 'transfer' && old.fromAccount && old.toAccount) {
-      batch.update(doc(db, 'accounts', old.fromAccount), { balance: increment(oldAmt), updatedAt: serverTimestamp() });
-      batch.update(doc(db, 'accounts', old.toAccount), { balance: increment(-oldAmt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), old.fromAccount), { balance: increment(oldAmt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), old.toAccount), { balance: increment(-oldAmt), updatedAt: serverTimestamp() });
     }
     const newAmt = Number(newData.amount);
     if (newData.type === 'income' && newData.toAccount) {
-      batch.update(doc(db, 'accounts', newData.toAccount), { balance: increment(newAmt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), newData.toAccount), { balance: increment(newAmt), updatedAt: serverTimestamp() });
     } else if (newData.type === 'expense' && newData.fromAccount) {
-      batch.update(doc(db, 'accounts', newData.fromAccount), { balance: increment(-newAmt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), newData.fromAccount), { balance: increment(-newAmt), updatedAt: serverTimestamp() });
     } else if (newData.type === 'transfer' && newData.fromAccount && newData.toAccount) {
-      batch.update(doc(db, 'accounts', newData.fromAccount), { balance: increment(-newAmt), updatedAt: serverTimestamp() });
-      batch.update(doc(db, 'accounts', newData.toAccount), { balance: increment(newAmt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), newData.fromAccount), { balance: increment(-newAmt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), newData.toAccount), { balance: increment(newAmt), updatedAt: serverTimestamp() });
     }
     const date = newData.date instanceof Date ? Timestamp.fromDate(newData.date) : newData.date;
-    batch.update(doc(db, 'transactions', id), {
+    batch.update(doc(db, C('transactions'), id), {
       type: newData.type,
       amount: newAmt,
       description: newData.description || '',
@@ -170,7 +174,7 @@ export function DataProvider({ children }) {
         );
         const total = Number(debt.totalAmount) || 0;
         const newStatus = newRemaining <= 0 ? 'paid' : newRemaining >= total ? 'unpaid' : 'partial';
-        batch.update(doc(db, 'debts', old.debtId), {
+        batch.update(doc(db, C('debts'), old.debtId), {
           remainingAmount: newRemaining,
           installments,
           status: newStatus,
@@ -183,7 +187,7 @@ export function DataProvider({ children }) {
   // ===== Debts =====
   async function addDebt(data) {
     const totalAmount = Number(data.totalAmount);
-    return addDoc(collection(db, 'debts'), {
+    return addDoc(collection(db, C('debts')), {
       type: data.type,
       personName: data.personName,
       totalAmount,
@@ -206,11 +210,11 @@ export function DataProvider({ children }) {
     if (data.dueDate !== undefined) update.dueDate = data.dueDate instanceof Date ? Timestamp.fromDate(data.dueDate) : data.dueDate;
     if (data.description !== undefined) update.description = data.description;
     if (data.status !== undefined) update.status = data.status;
-    return updateDoc(doc(db, 'debts', id), update);
+    return updateDoc(doc(db, C('debts'), id), update);
   }
 
   async function deleteDebt(id) {
-    return deleteDoc(doc(db, 'debts', id));
+    return deleteDoc(doc(db, C('debts'), id));
   }
 
   async function payInstallment(debtId, amount, accountId) {
@@ -224,7 +228,7 @@ export function DataProvider({ children }) {
     const txType = debt.type === 'utang' ? 'expense' : 'income';
     const now = new Date();
     const batch = writeBatch(db);
-    const txRef = doc(collection(db, 'transactions'));
+    const txRef = doc(collection(db, C('transactions')));
 
     batch.set(txRef, {
       type: txType,
@@ -238,15 +242,15 @@ export function DataProvider({ children }) {
     });
 
     if (txType === 'expense') {
-      batch.update(doc(db, 'accounts', accountId), { balance: increment(-amt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), accountId), { balance: increment(-amt), updatedAt: serverTimestamp() });
     } else {
-      batch.update(doc(db, 'accounts', accountId), { balance: increment(amt), updatedAt: serverTimestamp() });
+      batch.update(doc(db, C('accounts'), accountId), { balance: increment(amt), updatedAt: serverTimestamp() });
     }
 
     const newRemaining = debt.remainingAmount - amt;
     const newStatus = newRemaining <= 0 ? 'paid' : 'partial';
     const installment = { amount: amt, date: Timestamp.fromDate(now), transactionId: txRef.id };
-    batch.update(doc(db, 'debts', debtId), {
+    batch.update(doc(db, C('debts'), debtId), {
       remainingAmount: newRemaining,
       status: newStatus,
       installments: [...(debt.installments || []), installment],
@@ -257,7 +261,7 @@ export function DataProvider({ children }) {
 
   // ===== Reminders =====
   async function addReminder(data) {
-    return addDoc(collection(db, 'reminders'), {
+    return addDoc(collection(db, C('reminders')), {
       title: data.title,
       dayOfMonth: Number(data.dayOfMonth),
       amount: data.amount ? Number(data.amount) : null,
@@ -268,18 +272,18 @@ export function DataProvider({ children }) {
   }
 
   async function updateReminder(id, data) {
-    return updateDoc(doc(db, 'reminders', id), data);
+    return updateDoc(doc(db, C('reminders'), id), data);
   }
 
   async function deleteReminder(id) {
-    return deleteDoc(doc(db, 'reminders', id));
+    return deleteDoc(doc(db, C('reminders'), id));
   }
 
   // ===== Reset =====
   async function resetAllData() {
     const collections = ['accounts', 'transactions', 'debts', 'reminders'];
     for (const col of collections) {
-      const snap = await getDocs(collection(db, col));
+      const snap = await getDocs(collection(db, C(col)));
       const batch = writeBatch(db);
       snap.docs.forEach((d) => batch.delete(d.ref));
       await batch.commit();

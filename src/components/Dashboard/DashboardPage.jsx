@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useData } from '../../contexts/DataContext';
+import { useDemo } from '../../contexts/DemoContext';
 import BalanceSummary from './BalanceSummary';
 import MonthlyChart from './MonthlyChart';
 import RecentTransactions from './RecentTransactions';
@@ -9,6 +10,8 @@ import { formatCurrency } from '../../utils/formatCurrency';
 
 export default function DashboardPage() {
   const { transactions, accounts, debts, totalBalance, loading } = useData();
+  const { isDemo } = useDemo();
+  const base = isDemo ? '/demo' : '';
 
   const { monthIncome, monthExpense, chartData, recent } = useMemo(() => {
     const now = new Date();
@@ -64,7 +67,7 @@ export default function DashboardPage() {
       <BalanceSummary totalBalance={totalBalance} income={monthIncome} expense={monthExpense} />
 
       {dueSoon.length > 0 && (
-        <Link to="/utang" className="block">
+        <Link to={`${base}/utang`} className="block">
           <div className="bg-warning-bg border border-warning/30 rounded-xl p-3 flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-warning text-white flex items-center justify-center">⚠</div>
             <div className="flex-1 text-sm">
@@ -77,15 +80,15 @@ export default function DashboardPage() {
       )}
 
       <div className="grid grid-cols-3 gap-2">
-        <Link to="/transaksi" className="card flex flex-col items-center justify-center py-4 px-2 active:bg-gray-50">
+        <Link to={`${base}/transaksi`} className="card flex flex-col items-center justify-center py-4 px-2 active:bg-gray-50">
           <span className="text-2xl">💸</span>
           <span className="text-xs font-medium mt-1 text-center">Transaksi</span>
         </Link>
-        <Link to="/rekening" className="card flex flex-col items-center justify-center py-4 px-2 active:bg-gray-50">
+        <Link to={`${base}/rekening`} className="card flex flex-col items-center justify-center py-4 px-2 active:bg-gray-50">
           <span className="text-2xl">🏦</span>
           <span className="text-xs font-medium mt-1 text-center">Rekening</span>
         </Link>
-        <Link to="/utang" className="card flex flex-col items-center justify-center py-4 px-2 active:bg-gray-50">
+        <Link to={`${base}/utang`} className="card flex flex-col items-center justify-center py-4 px-2 active:bg-gray-50">
           <span className="text-2xl">📋</span>
           <span className="text-xs font-medium mt-1 text-center">Utang</span>
         </Link>

@@ -1,11 +1,15 @@
 rules_version = '2';
 
-// Pusat Gadai Madiun — single-tenant PIN-protected app dengan
-// Firebase Anonymous Auth sebagai gerbang pertama. PIN tetap
-// diverifikasi di client terhadap config/settings.pinHash.
+// Pusat Gadai Madiun
 //
-// Rules ini TIDAK pernah expire (tidak pakai timestamp check) dan
-// hanya mengizinkan request yang memiliki Auth token.
+// Real collections (accounts/transactions/debts/reminders + config/settings)
+// memerlukan Firebase Auth (anonymous sign-in di-handle otomatis oleh app).
+//
+// Demo collections (demo_*) terbuka untuk publik karena dipakai showcase
+// portfolio. Data demo di-reset otomatis setiap hari oleh client (lazy
+// reset) sehingga abuse hanya berdampak sampai reset berikutnya.
+//
+// Rules ini TIDAK pernah expire (no time-based check).
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -13,6 +17,8 @@ service cloud.firestore {
     function signedIn() {
       return request.auth != null;
     }
+
+    // ===== Real (auth-required) =====
 
     match /config/settings {
       allow read: if signedIn();
@@ -29,6 +35,15 @@ service cloud.firestore {
     match /debts/{id}         { allow read, write: if signedIn(); }
     match /reminders/{id}     { allow read, write: if signedIn(); }
 
+    // ===== Demo (public) =====
+
+    match /demo_config/{id}        { allow read, write: if true; }
+    match /demo_accounts/{id}      { allow read, write: if true; }
+    match /demo_transactions/{id}  { allow read, write: if true; }
+    match /demo_debts/{id}         { allow read, write: if true; }
+    match /demo_reminders/{id}     { allow read, write: if true; }
+
+    // Catch-all
     match /{document=**} {
       allow read, write: if false;
     }

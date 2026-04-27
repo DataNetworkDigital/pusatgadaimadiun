@@ -1,8 +1,11 @@
 import { Link } from 'react-router-dom';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
+import { useDemo } from '../../contexts/DemoContext';
 
 export default function RecentTransactions({ transactions, accounts }) {
+  const { isDemo } = useDemo();
+  const base = isDemo ? '/demo' : '';
   const accountName = (id) => accounts.find((a) => a.id === id)?.name || '-';
 
   if (!transactions.length) {
@@ -20,7 +23,7 @@ export default function RecentTransactions({ transactions, accounts }) {
     <div className="card">
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold text-gray-900">Transaksi Terakhir</h3>
-        <Link to="/transaksi" className="text-xs text-primary font-medium">Lihat semua →</Link>
+        <Link to={`${base}/transaksi`} className="text-xs text-primary font-medium">Lihat semua →</Link>
       </div>
       <ul className="divide-y divide-gray-100">
         {transactions.map((tx) => {
