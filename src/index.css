@@ -4,7 +4,7 @@
 
 @layer base {
   html, body {
-    @apply bg-gray-50 text-gray-900 font-sans antialiased;
+    @apply bg-cream text-ink font-sans antialiased;
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
   }
