@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react';
 import NumPad from './NumPad';
 import { useAuth } from '../../contexts/AuthContext';
-import { hashPin } from '../../utils/hashPin';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
 
 const LOCKOUT_MS = 30000;
 const MAX_ATTEMPTS = 5;
@@ -16,24 +13,11 @@ export default function PinScreen() {
   const [attempts, setAttempts] = useState(0);
   const [lockedUntil, setLockedUntil] = useState(0);
   const [now, setNow] = useState(Date.now());
-  const [isDefaultPin, setIsDefaultPin] = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const snap = await getDoc(doc(db, 'config', 'settings'));
-        if (snap.exists()) {
-          const defaultHash = await hashPin('080808');
-          setIsDefaultPin(snap.data().pinHash === defaultHash);
-        }
-      } catch {}
-    })();
-  }, [loading]);
 
   const isLocked = lockedUntil > now;
   const lockSeconds = Math.max(0, Math.ceil((lockedUntil - now) / 1000));
@@ -117,9 +101,6 @@ export default function PinScreen() {
           onClear={handleClear}
           disabled={loading || isLocked}
         />
-        {isDefaultPin && (
-          <p className="text-center text-xs text-gray-400 mt-6">PIN default: 080808 (segera ganti di Pengaturan)</p>
-        )}
       </div>
     </div>
   );
