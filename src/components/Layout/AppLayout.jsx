@@ -9,7 +9,7 @@ import { useDemo } from '../../contexts/DemoContext';
 export default function AppLayout() {
   const { isDemo } = useDemo();
   return (
-    <div className="min-h-[100svh] bg-gray-50">
+    <div className="min-h-[100svh] bg-cream">
       {isDemo && <DemoBanner />}
       <Sidebar />
       <main className="sm:pl-60 pb-24 sm:pb-8">

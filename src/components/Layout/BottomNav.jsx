@@ -1,34 +1,38 @@
 import { NavLink } from 'react-router-dom';
 import { useDemo } from '../../contexts/DemoContext';
+import { IcHome, IcSwap, IcCalendar, IcLedger, IcSettings } from '../common/icons';
 
 const items = [
-  { to: '', label: 'Beranda', icon: '🏠' },
-  { to: 'transaksi', label: 'Transaksi', icon: '💸' },
-  { to: 'kalender', label: 'Kalender', icon: '📅' },
-  { to: 'utang', label: 'Utang', icon: '📋' },
-  { to: 'pengaturan', label: 'Pengaturan', icon: '⚙️' },
+  { to: '', label: 'Beranda', Icon: IcHome },
+  { to: 'transaksi', label: 'Transaksi', Icon: IcSwap },
+  { to: 'kalender', label: 'Kalender', Icon: IcCalendar },
+  { to: 'utang', label: 'Utang', Icon: IcLedger },
+  { to: 'pengaturan', label: 'Pengaturan', Icon: IcSettings },
 ];
 
 export default function BottomNav() {
   const { isDemo } = useDemo();
   const base = isDemo ? '/demo' : '';
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 safe-bottom sm:hidden">
-      <ul className="flex justify-around">
-        {items.map((it) => {
-          const path = it.to ? `${base}/${it.to}` : (base || '/');
+    <nav className="fixed bottom-0 left-0 right-0 bg-paper border-t border-line z-30 safe-bottom sm:hidden">
+      <ul className="flex">
+        {items.map(({ to, label, Icon }) => {
+          const path = to ? `${base}/${to}` : (base || '/');
           return (
-            <li key={it.to || 'home'} className="flex-1">
+            <li key={to || 'home'} className="flex-1">
               <NavLink
                 to={path}
-                end={!it.to}
+                end={!to}
                 className={({ isActive }) =>
-                  'flex flex-col items-center justify-center py-2 text-xs ' +
-                  (isActive ? 'text-primary' : 'text-gray-500')
+                  `flex flex-col items-center gap-[3px] py-2 px-1 ${isActive ? 'text-indigo' : 'text-ink-mute'}`
                 }
               >
-                <span className="text-xl leading-none">{it.icon}</span>
-                <span className="mt-0.5 font-medium">{it.label}</span>
+                {({ isActive }) => (
+                  <>
+                    <Icon size={24} sw={isActive ? 2.1 : 1.75} />
+                    <span className={`text-[11px] tracking-[-0.1px] ${isActive ? 'font-semibold' : 'font-medium'}`}>{label}</span>
+                  </>
+                )}
               </NavLink>
             </li>
           );
