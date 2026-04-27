@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
 import { DemoProvider } from './contexts/DemoContext';
@@ -39,7 +39,7 @@ function AppRoutes() {
         <Route path="utang" element={<DebtList />} />
         <Route path="kalender" element={<CalendarPage />} />
         <Route path="pengaturan" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="" replace />} />
+        <Route path="*" element={<DashboardPage />} />
       </Route>
     </Routes>
   );
@@ -103,7 +103,9 @@ export default function App() {
           path="/demo/*"
           element={
             <DemoProvider isDemo>
-              <DemoGate />
+              <AuthProvider>
+                <DemoGate />
+              </AuthProvider>
             </DemoProvider>
           }
         />
