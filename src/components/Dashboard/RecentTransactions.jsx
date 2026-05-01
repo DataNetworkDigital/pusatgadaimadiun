@@ -2,57 +2,87 @@ import { Link } from 'react-router-dom';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
 import { useDemo } from '../../contexts/DemoContext';
+import SectionTitle from '../common/SectionTitle';
+import Card from '../common/Card';
+import { IcArrowDown, IcArrowUp, IcSwap } from '../common/icons';
+
+function TxIcon({ type }) {
+  const palette =
+    type === 'income'
+      ? { bg: 'bg-daun-soft', stroke: '#5C8A4E', Icon: IcArrowDown }
+      : type === 'transfer'
+      ? { bg: 'bg-langit-soft', stroke: '#4A7BA0', Icon: IcSwap }
+      : { bg: 'bg-terra-soft', stroke: '#B85450', Icon: IcArrowUp };
+  const { Icon } = palette;
+  return (
+    <div className={`w-[42px] h-[42px] rounded-xl flex items-center justify-center flex-shrink-0 ${palette.bg}`}>
+      <Icon size={20} stroke={palette.stroke} sw={2} />
+    </div>
+  );
+}
+
+function TxRow({ tx, accountName, isLast }) {
+  const isIncome = tx.type === 'income';
+  const isTransfer = tx.type === 'transfer';
+  const sign = isIncome ? '+' : isTransfer ? '' : '−';
+  const amountColor = isIncome ? 'text-daun' : isTransfer ? 'text-langit' : 'text-terra';
+  const account = isTransfer
+    ? `${accountName(tx.fromAccount)} → ${accountName(tx.toAccount)}`
+    : accountName(isIncome ? tx.toAccount : tx.fromAccount);
+  return (
+    <div className={`flex items-center gap-3 py-3.5 ${isLast ? '' : 'border-b border-line-soft'}`}>
+      <TxIcon type={tx.type} />
+      <div className="flex-1 min-w-0">
+        <div className="text-[16px] font-medium text-ink leading-tight truncate">
+          {tx.description || (isIncome ? 'Pemasukan' : isTransfer ? 'Transfer' : 'Pengeluaran')}
+        </div>
+        <div className="text-[13px] text-ink-mute mt-0.5 truncate">
+          {account} · {formatDate(tx.date, { short: true })}
+        </div>
+      </div>
+      <div
+        className={`font-num text-[16px] font-semibold whitespace-nowrap ${amountColor}`}
+        style={{ fontVariantNumeric: 'tabular-nums' }}
+      >
+        {sign}
+        {formatCurrency(tx.amount, false)}
+      </div>
+    </div>
+  );
+}
 
 export default function RecentTransactions({ transactions, accounts }) {
   const { isDemo } = useDemo();
   const base = isDemo ? '/demo' : '';
-  const accountName = (id) => accounts.find((a) => a.id === id)?.name || '-';
+  const accountName = (id) => accounts.find((a) => a.id === id)?.name || '—';
 
   if (!transactions.length) {
     return (
-      <div className="card">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="font-semibold text-gray-900">Transaksi Terakhir</h3>
-        </div>
-        <p className="text-sm text-gray-500 py-6 text-center">Belum ada transaksi.</p>
-      </div>
+      <Card>
+        <h3 className="font-display text-[19px] font-semibold text-ink tracking-tight mb-2">
+          Transaksi Terakhir
+        </h3>
+        <p className="text-sm text-ink-mute py-6 text-center">Belum ada transaksi.</p>
+      </Card>
     );
   }
 
   return (
-    <div className="card">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-gray-900">Transaksi Terakhir</h3>
-        <Link to={`${base}/transaksi`} className="text-xs text-primary font-medium">Lihat semua →</Link>
-      </div>
-      <ul className="divide-y divide-gray-100">
-        {transactions.map((tx) => {
-          const isIncome = tx.type === 'income';
-          const isTransfer = tx.type === 'transfer';
-          const color = isIncome ? 'text-income' : isTransfer ? 'text-transfer' : 'text-expense';
-          const sign = isIncome ? '+' : isTransfer ? '' : '-';
-          const account = isTransfer
-            ? `${accountName(tx.fromAccount)} → ${accountName(tx.toAccount)}`
-            : accountName(isIncome ? tx.toAccount : tx.fromAccount);
-          return (
-            <li key={tx.id} className="py-3 flex items-center gap-3">
-              <div className={
-                'w-9 h-9 rounded-full flex items-center justify-center text-sm ' +
-                (isIncome ? 'bg-income-bg text-income' : isTransfer ? 'bg-transfer-bg text-transfer' : 'bg-expense-bg text-expense')
-              }>
-                {isIncome ? '↓' : isTransfer ? '⇄' : '↑'}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-gray-900 truncate">{tx.description || (isIncome ? 'Pemasukan' : isTransfer ? 'Transfer' : 'Pengeluaran')}</div>
-                <div className="text-xs text-gray-500 truncate">{account} · {formatDate(tx.date, { short: true })}</div>
-              </div>
-              <div className={`text-sm font-semibold ${color} whitespace-nowrap`}>
-                {sign}{formatCurrency(tx.amount, false)}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+    <div>
+      <SectionTitle
+        action={
+          <Link to={`${base}/transaksi`} className="text-[13px] font-semibold text-indigo">
+            Lihat semua →
+          </Link>
+        }
+      >
+        Transaksi Terakhir
+      </SectionTitle>
+      <Card className="!px-4 !py-1">
+        {transactions.map((tx, i) => (
+          <TxRow key={tx.id} tx={tx} accountName={accountName} isLast={i === transactions.length - 1} />
+        ))}
+      </Card>
     </div>
   );
 }
