@@ -151,3 +151,21 @@ export const IcMail = (p) => (
     <path d="m2 7 10 7L22 7" />
   </Icon>
 );
+export const IcBell = (p) => (
+  <Icon {...p}>
+    <path d="M6 8a6 6 0 0112 0c0 7 3 8 3 8H3s3-1 3-8z" />
+    <path d="M10 21a2 2 0 004 0" />
+  </Icon>
+);
+export const IcPower = (p) => (
+  <Icon {...p}>
+    <path d="M12 3v9" />
+    <path d="M5.6 6.6a8 8 0 1012.8 0" />
+  </Icon>
+);
+export const IcReceipt = (p) => (
+  <Icon {...p}>
+    <path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2V3z" />
+    <path d="M9 8h6M9 12h6M9 16h4" />
+  </Icon>
+);
