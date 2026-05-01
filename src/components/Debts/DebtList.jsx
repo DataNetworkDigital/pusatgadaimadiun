@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useData } from '../../contexts/DataContext';
 import PageHeader from '../common/PageHeader';
-import EmptyState from '../common/EmptyState';
+import IconButton from '../common/IconButton';
 import ConfirmDialog from '../common/ConfirmDialog';
 import DebtCard from './DebtCard';
 import DebtForm from './DebtForm';
 import InstallmentForm from './InstallmentForm';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { IcPlus } from '../common/icons';
 
 export default function DebtList() {
   const { debts, addDebt, updateDebt, deleteDebt } = useData();
@@ -17,7 +18,10 @@ export default function DebtList() {
   const [deleting, setDeleting] = useState(null);
 
   const list = useMemo(() => debts.filter((d) => d.type === tab), [debts, tab]);
-  const totalRemaining = useMemo(() => list.reduce((s, d) => s + (d.status !== 'paid' ? d.remainingAmount : 0), 0), [list]);
+  const totalRemaining = useMemo(
+    () => list.reduce((s, d) => s + (d.status !== 'paid' ? d.remainingAmount || 0 : 0), 0),
+    [list]
+  );
 
   function openAdd() {
     setEditing(null);
@@ -35,34 +39,56 @@ export default function DebtList() {
     setDeleting(null);
   }
 
+  const accentText = tab === 'utang' ? 'text-terra' : 'text-daun';
+
   return (
     <div>
       <PageHeader
         title="Utang & Piutang"
-        action={<button onClick={openAdd} className="btn-primary text-sm px-4 py-2">+ Tambah</button>}
+        action={
+          <IconButton variant="primary" onClick={openAdd} ariaLabel="Tambah utang/piutang">
+            <IcPlus size={20} sw={2.2} />
+          </IconButton>
+        }
       />
 
-      <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-lg mb-4">
-        <button onClick={() => setTab('utang')} className={'py-2 rounded-md text-sm font-semibold ' + (tab === 'utang' ? 'bg-white text-expense shadow-sm' : 'text-gray-600')}>
-          Utang Saya
-        </button>
-        <button onClick={() => setTab('piutang')} className={'py-2 rounded-md text-sm font-semibold ' + (tab === 'piutang' ? 'bg-white text-income shadow-sm' : 'text-gray-600')}>
-          Piutang Saya
-        </button>
+      <div className="bg-cream-deep rounded-[14px] p-1 flex gap-1 mb-4">
+        {[
+          { id: 'utang', label: 'Utang Saya', activeText: 'text-terra' },
+          { id: 'piutang', label: 'Piutang Saya', activeText: 'text-daun' },
+        ].map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={
+              'flex-1 py-2.5 rounded-[10px] text-[14px] font-semibold transition ' +
+              (tab === t.id
+                ? `bg-paper ${t.activeText} shadow-[0_1px_3px_rgba(140,110,60,0.1)]`
+                : 'bg-transparent text-ink-soft')
+            }
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      <div className="card mb-4">
-        <div className="text-xs text-gray-500">Total Belum Lunas</div>
-        <div className={`text-2xl font-extrabold ${tab === 'utang' ? 'text-expense' : 'text-income'}`}>{formatCurrency(totalRemaining)}</div>
+      <div className="bg-paper rounded-2xl border border-line shadow-card p-4 mb-3.5">
+        <div className="text-[12px] text-ink-mute font-medium uppercase tracking-[0.3px]">
+          Total Belum Lunas
+        </div>
+        <div
+          className={`font-display text-[28px] font-semibold mt-0.5 ${accentText}`}
+          style={{ fontVariantNumeric: 'tabular-nums' }}
+        >
+          {formatCurrency(totalRemaining)}
+        </div>
       </div>
 
       {list.length === 0 ? (
-        <EmptyState
-          icon="📋"
-          title={tab === 'utang' ? 'Belum ada utang' : 'Belum ada piutang'}
-          description={tab === 'utang' ? 'Catat utang untuk melacak kewajiban pembayaran.' : 'Catat piutang untuk melacak uang yang dipinjamkan.'}
-          action={<button onClick={openAdd} className="btn-primary">Tambah</button>}
-        />
+        <div className="py-10 px-5 text-center text-[14px] text-ink-mute">
+          Belum ada catatan. Tekan <strong className="text-indigo">+</strong> untuk menambah.
+        </div>
       ) : (
         <div className="space-y-3">
           {list.map((d) => (
@@ -70,14 +96,24 @@ export default function DebtList() {
               key={d.id}
               debt={d}
               onPay={setPaying}
-              onEdit={(x) => { setEditing(x); setFormOpen(true); }}
+              onEdit={(x) => {
+                setEditing(x);
+                setFormOpen(true);
+              }}
               onDelete={setDeleting}
             />
           ))}
         </div>
       )}
 
-      <DebtForm key={editing?.id || 'new'} open={formOpen} onClose={() => setFormOpen(false)} onSubmit={handleSubmit} initial={editing} defaultType={tab} />
+      <DebtForm
+        key={editing?.id || 'new'}
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        onSubmit={handleSubmit}
+        initial={editing}
+        defaultType={tab}
+      />
       <InstallmentForm open={!!paying} onClose={() => setPaying(null)} debt={paying} />
       <ConfirmDialog
         open={!!deleting}
