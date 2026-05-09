@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// Pusat Gadai Madiun — Firebase Storage rules.
+//
+// Mirrors the Firestore policy: real users (anonymous-auth signed in)
+// can read & write under project_proofs/, demo visitors can read &
+// write under demo_project_proofs/. Everything else is denied.
+//
+// File constraints (8 MB cap, PDF/image content types) are also
+// enforced at the rule level so a rogue client can't push large or
+// unrelated files.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function okSize() {
+      return request.resource.size < 8 * 1024 * 1024;
+    }
+
+    function okType() {
+      return request.resource.contentType.matches('application/pdf')
+          || request.resource.contentType.matches('image/.*');
+    }
+
+    match /project_proofs/{file} {
+      allow read: if signedIn();
+      allow write: if signedIn() && okSize() && okType();
+      allow delete: if signedIn();
+    }
+
+    match /demo_project_proofs/{file} {
+      allow read: if true;
+      allow write: if okSize() && okType();
+      allow delete: if true;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

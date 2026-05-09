@@ -275,7 +275,10 @@ export default function ProjectDetail() {
           className="flex items-center gap-2 px-4 py-3 mb-3.5 bg-paper border border-line rounded-2xl text-[13px] text-indigo font-semibold active:bg-cream-deep"
         >
           <IcInfo size={16} sw={1.9} />
-          Lihat bukti / kontrak →
+          <span className="flex-1 truncate">
+            {project.proofFileName ? `Lihat ${project.proofFileName}` : 'Lihat bukti / kontrak'}
+          </span>
+          <span>→</span>
         </a>
       )}
 
