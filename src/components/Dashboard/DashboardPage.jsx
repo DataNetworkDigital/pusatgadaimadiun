@@ -5,9 +5,11 @@ import { useDemo } from '../../contexts/DemoContext';
 import BalanceSummary from './BalanceSummary';
 import MonthlyChart from './MonthlyChart';
 import RecentTransactions from './RecentTransactions';
+import Card from '../common/Card';
 import { startOfMonth, endOfMonth, toDate, daysBetween, MONTHS_SHORT } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
-import { IcAlert, IcChevronRight, IcSwap, IcWallet, IcLedger } from '../common/icons';
+import { projectSummary } from '../../utils/projectSchedule';
+import { IcAlert, IcChevronRight, IcSwap, IcWallet, IcLedger, IcBriefcase } from '../common/icons';
 
 function DueBanner({ count, total, isOverdue, to }) {
   return (
@@ -67,7 +69,7 @@ function QuickActions({ base }) {
 }
 
 export default function DashboardPage() {
-  const { transactions, accounts, debts, totalBalance, loading } = useData();
+  const { transactions, accounts, debts, projects, totalBalance, loading } = useData();
   const { isDemo } = useDemo();
   const base = isDemo ? '/demo' : '';
 
@@ -113,11 +115,31 @@ export default function DashboardPage() {
     debts.forEach((d) => {
       if (d.status === 'paid') return;
       const days = daysBetween(now, toDate(d.dueDate));
-      if (days < 0) o.push(d);
-      else if (days <= 7) s.push(d);
+      if (days < 0) o.push({ kind: 'debt', amount: d.remainingAmount || 0 });
+      else if (days <= 7) s.push({ kind: 'debt', amount: d.remainingAmount || 0 });
+    });
+    projects.forEach((p) => {
+      if (p.status !== 'active') return;
+      (p.payments || []).forEach((pay) => {
+        if (pay.receivedAmount != null) return;
+        const days = daysBetween(now, toDate(pay.dueDate));
+        if (days < 0) o.push({ kind: 'project', amount: pay.expectedAmount || 0 });
+        else if (days <= 7) s.push({ kind: 'project', amount: pay.expectedAmount || 0 });
+      });
     });
     return { overdue: o, dueSoon: s };
-  }, [debts]);
+  }, [debts, projects]);
+
+  const projectStats = useMemo(() => {
+    const active = projects.filter((p) => p.status === 'active');
+    let modal = 0;
+    let expectedRemaining = 0;
+    active.forEach((p) => {
+      modal += Number(p.disbursedAmount) || 0;
+      expectedRemaining += projectSummary(p).expectedRemaining;
+    });
+    return { count: active.length, modal, expectedRemaining };
+  }, [projects]);
 
   if (loading) {
     return <div className="py-20 text-center text-ink-mute">Memuat data…</div>;
@@ -126,7 +148,11 @@ export default function DashboardPage() {
   const hasChartData = chartData.some((m) => m.Pemasukan > 0 || m.Pengeluaran > 0);
   const dueItems = overdue.length > 0 ? overdue : dueSoon;
   const dueIsOverdue = overdue.length > 0;
-  const dueTotal = dueItems.reduce((sum, d) => sum + (d.remainingAmount || 0), 0);
+  const dueTotal = dueItems.reduce((sum, d) => sum + (d.amount || 0), 0);
+  const dueHasProject = dueItems.some((d) => d.kind === 'project');
+  const dueLink = dueHasProject && !dueItems.some((d) => d.kind === 'debt')
+    ? `${base}/project`
+    : `${base}/catatan/utang`;
 
   return (
     <div className="space-y-4">
@@ -137,11 +163,43 @@ export default function DashboardPage() {
           count={dueItems.length}
           total={dueTotal}
           isOverdue={dueIsOverdue}
-          to={`${base}/catatan/utang`}
+          to={dueLink}
         />
       )}
 
       <QuickActions base={base} />
+
+      {projectStats.count > 0 && (
+        <Link to={`${base}/project`} className="block">
+          <Card className="!p-4 active:bg-cream-deep/30">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-indigo-soft text-indigo flex items-center justify-center flex-shrink-0">
+                <IcBriefcase size={22} sw={1.9} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-display text-[16px] font-semibold text-ink">
+                    {projectStats.count} Project Aktif
+                  </span>
+                  <IcChevronRight size={18} stroke="#8B7558" />
+                </div>
+                <div className="text-[12px] text-ink-mute mt-0.5">
+                  Modal {formatCurrency(projectStats.modal)}
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-line-soft flex items-baseline justify-between">
+              <span className="text-[12px] text-ink-soft">Ekspektasi belum cair</span>
+              <span
+                className="font-num text-[16px] font-semibold text-daun"
+                style={{ fontVariantNumeric: 'tabular-nums' }}
+              >
+                {formatCurrency(projectStats.expectedRemaining)}
+              </span>
+            </div>
+          </Card>
+        </Link>
+      )}
 
       <RecentTransactions transactions={recent} accounts={accounts} />
 
