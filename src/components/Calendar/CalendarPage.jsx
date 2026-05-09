@@ -8,8 +8,10 @@ import Pill from '../common/Pill';
 import CalendarGrid from './CalendarGrid';
 import DayDetail from './DayDetail';
 import ReminderForm from './ReminderForm';
+import AddActionSheet from './AddActionSheet';
 import TransactionDetail from '../Transactions/TransactionDetail';
 import TransactionForm from '../Transactions/TransactionForm';
+import DebtForm from '../Debts/DebtForm';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { IcPlus, IcEdit, IcTrash } from '../common/icons';
@@ -20,22 +22,39 @@ export default function CalendarPage() {
     accounts,
     debts,
     reminders,
+    projects,
     addReminder,
     updateReminder,
     deleteReminder,
     deleteTransaction,
+    addDebt,
   } = useData();
   const [month, setMonth] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selected, setSelected] = useState(new Date());
+  const [addSheetOpen, setAddSheetOpen] = useState(false);
   const [remOpen, setRemOpen] = useState(false);
   const [editingRem, setEditingRem] = useState(null);
   const [delRem, setDelRem] = useState(null);
   const [txDetail, setTxDetail] = useState(null);
   const [editingTx, setEditingTx] = useState(null);
+  const [txFormOpen, setTxFormOpen] = useState(false);
   const [delTx, setDelTx] = useState(null);
+  const [debtFormOpen, setDebtFormOpen] = useState(false);
+
+  function handlePickAdd(kind) {
+    if (kind === 'tx') {
+      setEditingTx(null);
+      setTxFormOpen(true);
+    } else if (kind === 'debt') {
+      setDebtFormOpen(true);
+    } else if (kind === 'reminder') {
+      setEditingRem(null);
+      setRemOpen(true);
+    }
+  }
 
   function prev() {
     setMonth((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1));
@@ -62,11 +81,8 @@ export default function CalendarPage() {
         action={
           <IconButton
             variant="primary"
-            onClick={() => {
-              setEditingRem(null);
-              setRemOpen(true);
-            }}
-            ariaLabel="Tambah reminder"
+            onClick={() => setAddSheetOpen(true)}
+            ariaLabel="Tambah catatan"
           >
             <IcPlus size={20} sw={2.2} />
           </IconButton>
@@ -78,6 +94,7 @@ export default function CalendarPage() {
         transactions={transactions}
         debts={debts}
         reminders={reminders}
+        projects={projects}
         selected={selected}
         onSelect={setSelected}
         onPrev={prev}
@@ -90,6 +107,7 @@ export default function CalendarPage() {
         accounts={accounts}
         debts={debts}
         reminders={reminders}
+        projects={projects}
         onSelectTx={setTxDetail}
       />
 
@@ -164,6 +182,7 @@ export default function CalendarPage() {
         onEdit={(t) => {
           setTxDetail(null);
           setEditingTx(t);
+          setTxFormOpen(true);
         }}
         onDelete={(t) => {
           setTxDetail(null);
@@ -172,9 +191,25 @@ export default function CalendarPage() {
       />
       <TransactionForm
         key={`tx-${editingTx?.id || 'new'}`}
-        open={!!editingTx}
-        onClose={() => setEditingTx(null)}
+        open={txFormOpen}
+        onClose={() => {
+          setTxFormOpen(false);
+          setEditingTx(null);
+        }}
         initial={editingTx}
+      />
+      <DebtForm
+        key="debt-new"
+        open={debtFormOpen}
+        onClose={() => setDebtFormOpen(false)}
+        onSubmit={addDebt}
+        initial={null}
+        defaultType="utang"
+      />
+      <AddActionSheet
+        open={addSheetOpen}
+        onClose={() => setAddSheetOpen(false)}
+        onPick={handlePickAdd}
       />
       <ConfirmDialog
         open={!!delRem}

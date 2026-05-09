@@ -1,11 +1,23 @@
+import { Link } from 'react-router-dom';
 import { formatDate, isSameDay, toDate } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { useDemo } from '../../contexts/DemoContext';
 import Card from '../common/Card';
 import SectionTitle from '../common/SectionTitle';
 import TxRow from '../common/TxRow';
-import { IcBell, IcAlert } from '../common/icons';
+import { IcBell, IcAlert, IcBriefcase, IcChevronRight } from '../common/icons';
 
-export default function DayDetail({ date, transactions, accounts, debts, reminders, onSelectTx }) {
+export default function DayDetail({
+  date,
+  transactions,
+  accounts,
+  debts,
+  reminders,
+  projects = [],
+  onSelectTx,
+}) {
+  const { isDemo } = useDemo();
+  const base = isDemo ? '/demo' : '';
   if (!date) return null;
   const accountName = (id) => accounts.find((a) => a.id === id)?.name || '—';
   const dayTx = transactions.filter((tx) => isSameDay(toDate(tx.date), date));
@@ -15,7 +27,20 @@ export default function DayDetail({ date, transactions, accounts, debts, reminde
   const dayReminders = reminders.filter(
     (r) => r.isActive && r.dayOfMonth === date.getDate()
   );
-  const empty = dayTx.length === 0 && dayDebts.length === 0 && dayReminders.length === 0;
+  const dayProjectPayments = [];
+  projects.forEach((p) => {
+    if (p.status !== 'active') return;
+    (p.payments || []).forEach((pay) => {
+      if (pay.receivedAmount == null && isSameDay(toDate(pay.dueDate), date)) {
+        dayProjectPayments.push({ project: p, payment: pay });
+      }
+    });
+  });
+  const empty =
+    dayTx.length === 0 &&
+    dayDebts.length === 0 &&
+    dayReminders.length === 0 &&
+    dayProjectPayments.length === 0;
 
   return (
     <div>
@@ -26,6 +51,42 @@ export default function DayDetail({ date, transactions, accounts, debts, reminde
             Tidak ada catatan hari ini.
           </div>
         )}
+
+        {dayProjectPayments.map(({ project, payment }, i) => (
+          <Link
+            key={`${project.id}-${payment.no}`}
+            to={`${base}/project/${project.id}`}
+            className={`flex items-center gap-3 py-3.5 active:bg-cream-deep/40 ${
+              i < dayProjectPayments.length - 1 ||
+              dayDebts.length > 0 ||
+              dayReminders.length > 0 ||
+              dayTx.length > 0
+                ? 'border-b border-line-soft'
+                : ''
+            }`}
+          >
+            <div className="w-[42px] h-[42px] rounded-xl bg-indigo-soft text-indigo flex items-center justify-center flex-shrink-0">
+              <IcBriefcase size={20} sw={2} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[16px] font-medium text-ink leading-tight truncate">
+                {project.name}
+              </div>
+              <div className="text-[13px] text-ink-mute mt-0.5">
+                {payment.type === 'final' ? 'Pelunasan' : `Return bulan ${payment.no}`}
+              </div>
+            </div>
+            <div className="text-right">
+              <div
+                className="font-num text-[16px] font-semibold text-indigo whitespace-nowrap"
+                style={{ fontVariantNumeric: 'tabular-nums' }}
+              >
+                {formatCurrency(payment.expectedAmount, false)}
+              </div>
+            </div>
+            <IcChevronRight size={16} stroke="#8B7558" className="flex-shrink-0" />
+          </Link>
+        ))}
 
         {dayDebts.map((d, i) => (
           <div

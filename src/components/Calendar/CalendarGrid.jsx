@@ -7,6 +7,7 @@ export default function CalendarGrid({
   transactions,
   debts,
   reminders,
+  projects = [],
   selected,
   onSelect,
   onPrev,
@@ -28,6 +29,7 @@ export default function CalendarGrid({
     let hasTr = false;
     let hasDue = false;
     let hasRem = false;
+    let hasProject = false;
     transactions.forEach((tx) => {
       if (isSameDay(toDate(tx.date), date)) {
         if (tx.type === 'income') hasInc = true;
@@ -41,7 +43,15 @@ export default function CalendarGrid({
     reminders.forEach((r) => {
       if (r.isActive && r.dayOfMonth === date.getDate()) hasRem = true;
     });
-    return { hasInc, hasExp, hasTr, hasDue, hasRem };
+    projects.forEach((p) => {
+      if (p.status !== 'active') return;
+      (p.payments || []).forEach((pay) => {
+        if (pay.receivedAmount == null && isSameDay(toDate(pay.dueDate), date)) {
+          hasProject = true;
+        }
+      });
+    });
+    return { hasInc, hasExp, hasTr, hasDue, hasRem, hasProject };
   }
 
   return (
@@ -101,13 +111,14 @@ export default function CalendarGrid({
                 {ind.hasTr && <span className={`${dotBase} ${dotColor('bg-langit')}`} />}
                 {ind.hasDue && <span className={`${dotBase} ${dotColor('bg-emas')}`} />}
                 {ind.hasRem && <span className={`${dotBase} ${dotColor('bg-emas')}`} />}
+                {ind.hasProject && <span className={`${dotBase} ${dotColor('bg-indigo')}`} />}
               </div>
             </button>
           );
         })}
       </div>
 
-      <div className="flex flex-wrap gap-3 mt-4 text-[11px] text-ink-mute">
+      <div className="flex flex-wrap gap-x-3 gap-y-1.5 mt-4 text-[11px] text-ink-mute">
         <span className="flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-daun" /> Pemasukan
         </span>
@@ -119,6 +130,9 @@ export default function CalendarGrid({
         </span>
         <span className="flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-emas" /> Reminder / Tempo
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo" /> Project
         </span>
       </div>
     </Card>
