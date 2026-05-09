@@ -1,20 +1,29 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useDemo } from '../../contexts/DemoContext';
 import KawungMark from '../common/KawungMark';
-import { IcHome, IcWallet, IcSwap, IcCalendar, IcLedger, IcSettings } from '../common/icons';
+import {
+  IcHome,
+  IcWallet,
+  IcLedger,
+  IcBriefcase,
+  IcCalendar,
+  IcSettings,
+} from '../common/icons';
 
 const items = [
   { to: '', label: 'Beranda', Icon: IcHome },
   { to: 'rekening', label: 'Rekening', Icon: IcWallet },
-  { to: 'transaksi', label: 'Transaksi', Icon: IcSwap },
+  { to: 'catatan', label: 'Catatan', Icon: IcLedger, alt: ['transaksi', 'utang'] },
+  { to: 'project', label: 'Project', Icon: IcBriefcase },
   { to: 'kalender', label: 'Kalender', Icon: IcCalendar },
-  { to: 'utang', label: 'Utang & Piutang', Icon: IcLedger },
   { to: 'pengaturan', label: 'Pengaturan', Icon: IcSettings },
 ];
 
 export default function Sidebar() {
   const { isDemo } = useDemo();
+  const location = useLocation();
   const base = isDemo ? '/demo' : '';
+  const path = location.pathname;
   return (
     <aside className="hidden sm:flex flex-col w-60 bg-paper border-r border-line fixed inset-y-0 left-0 z-20">
       <div className="px-5 py-6 border-b border-line">
@@ -28,14 +37,18 @@ export default function Sidebar() {
       </div>
       <nav className="flex-1 py-3">
         <ul className="space-y-1 px-2">
-          {items.map(({ to, label, Icon }) => {
-            const path = to ? `${base}/${to}` : (base || '/');
+          {items.map(({ to, label, Icon, alt = [] }) => {
+            const target = to ? `${base}/${to}` : (base || '/');
+            const isActive =
+              (!to && (path === '/' || path === (base || '/'))) ||
+              (to && path.startsWith(`${base}/${to}`)) ||
+              alt.some((a) => path.startsWith(`${base}/${a}`));
             return (
               <li key={to || 'home'}>
                 <NavLink
-                  to={path}
+                  to={target}
                   end={!to}
-                  className={({ isActive }) =>
+                  className={
                     `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${
                       isActive
                         ? 'bg-indigo-soft text-indigo'
@@ -43,12 +56,8 @@ export default function Sidebar() {
                     }`
                   }
                 >
-                  {({ isActive }) => (
-                    <>
-                      <Icon size={20} sw={isActive ? 2.1 : 1.75} />
-                      <span>{label}</span>
-                    </>
-                  )}
+                  <Icon size={20} sw={isActive ? 2.1 : 1.75} />
+                  <span>{label}</span>
                 </NavLink>
               </li>
             );

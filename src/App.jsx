@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
 import { DemoProvider } from './contexts/DemoContext';
@@ -12,6 +12,9 @@ import TransactionList from './components/Transactions/TransactionList';
 import DebtList from './components/Debts/DebtList';
 import CalendarPage from './components/Calendar/CalendarPage';
 import SettingsPage from './components/Settings/SettingsPage';
+import CatatanLayout from './components/Catatan/CatatanLayout';
+import ProjectList from './components/Projects/ProjectList';
+import ProjectDetail from './components/Projects/ProjectDetail';
 import DemoLoading from './components/Demo/DemoLoading';
 import { ensureDemoFresh, incrementVisitor } from './utils/demoReset';
 import { authReady } from './firebase';
@@ -36,10 +39,18 @@ function AppRoutes() {
       <Route element={<AppLayout />}>
         <Route index element={<DashboardPage />} />
         <Route path="rekening" element={<AccountList />} />
-        <Route path="transaksi" element={<TransactionList />} />
-        <Route path="utang" element={<DebtList />} />
+        <Route path="catatan" element={<CatatanLayout />}>
+          <Route index element={<Navigate to="transaksi" replace />} />
+          <Route path="transaksi" element={<TransactionList />} />
+          <Route path="utang" element={<DebtList />} />
+        </Route>
+        <Route path="project" element={<ProjectList />} />
+        <Route path="project/:id" element={<ProjectDetail />} />
         <Route path="kalender" element={<CalendarPage />} />
         <Route path="pengaturan" element={<SettingsPage />} />
+        {/* legacy redirects */}
+        <Route path="transaksi" element={<Navigate to="../catatan/transaksi" replace />} />
+        <Route path="utang" element={<Navigate to="../catatan/utang" replace />} />
         <Route path="*" element={<DashboardPage />} />
       </Route>
     </Routes>

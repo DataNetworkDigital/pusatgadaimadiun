@@ -44,9 +44,9 @@ function DueBanner({ count, total, isOverdue, to }) {
 }
 
 const QUICK_ACTIONS = [
-  { to: 'transaksi', label: 'Transaksi', Icon: IcSwap },
+  { to: 'catatan/transaksi', label: 'Transaksi', Icon: IcSwap },
   { to: 'rekening', label: 'Rekening', Icon: IcWallet },
-  { to: 'utang', label: 'Utang', Icon: IcLedger },
+  { to: 'catatan/utang', label: 'Utang', Icon: IcLedger },
 ];
 
 function QuickActions({ base }) {
@@ -137,7 +137,7 @@ export default function DashboardPage() {
           count={dueItems.length}
           total={dueTotal}
           isOverdue={dueIsOverdue}
-          to={`${base}/utang`}
+          to={`${base}/catatan/utang`}
         />
       )}
 

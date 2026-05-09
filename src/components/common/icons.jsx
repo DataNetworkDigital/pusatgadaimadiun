@@ -169,3 +169,22 @@ export const IcReceipt = (p) => (
     <path d="M9 8h6M9 12h6M9 16h4" />
   </Icon>
 );
+export const IcBriefcase = (p) => (
+  <Icon {...p}>
+    <rect x="3" y="7" width="18" height="13" rx="2" />
+    <path d="M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2" />
+    <path d="M3 13h18" />
+  </Icon>
+);
+export const IcCoin = (p) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v10M9 9h4.5a1.5 1.5 0 010 3H9h5a2 2 0 010 4H9" />
+  </Icon>
+);
+export const IcInfo = (p) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5M12 8h.01" />
+  </Icon>
+);

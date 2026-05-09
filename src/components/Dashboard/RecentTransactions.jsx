@@ -24,7 +24,7 @@ export default function RecentTransactions({ transactions, accounts }) {
     <div>
       <SectionTitle
         action={
-          <Link to={`${base}/transaksi`} className="text-[13px] font-semibold text-indigo">
+          <Link to={`${base}/catatan/transaksi`} className="text-[13px] font-semibold text-indigo">
             Lihat semua →
           </Link>
         }
