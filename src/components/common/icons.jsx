@@ -140,6 +140,13 @@ export const IcExport = (p) => (
     <path d="M5 21h14" />
   </Icon>
 );
+export const IcDownload = (p) => (
+  <Icon {...p}>
+    <path d="M12 3v12" />
+    <path d="M7 10l5 5 5-5" />
+    <path d="M5 21h14" />
+  </Icon>
+);
 export const IcCheck = (p) => (
   <Icon {...p}>
     <path d="M5 12l5 5L20 7" />

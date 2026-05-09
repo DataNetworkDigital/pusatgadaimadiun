@@ -9,7 +9,8 @@ import ExportSheet from './ExportSheet';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { projectSummary } from '../../utils/projectSchedule';
 import { exportProjectsToExcel, exportProjectsToPdf } from '../../utils/projectExport';
-import { IcPlus, IcExport } from '../common/icons';
+import { startOfMonth, endOfMonth, toDate } from '../../utils/formatDate';
+import { IcPlus, IcDownload } from '../common/icons';
 
 export default function ProjectList() {
   const { projects, accounts, addProject } = useData();
@@ -34,6 +35,31 @@ export default function ProjectList() {
     return { modal, expectedRemaining };
   }, [active]);
 
+  const monthlyReturn = useMemo(() => {
+    const now = new Date();
+    const mStart = startOfMonth(now);
+    const mEnd = endOfMonth(now);
+    let received = 0;
+    let dueThisMonth = 0;
+    let pendingThisMonth = 0;
+    projects.forEach((p) => {
+      (p.payments || []).forEach((pay) => {
+        const due = toDate(pay.dueDate);
+        const recv = toDate(pay.receivedDate);
+        if (recv && recv >= mStart && recv <= mEnd) {
+          received += pay.receivedAmount || 0;
+        }
+        if (due && due >= mStart && due <= mEnd) {
+          dueThisMonth += pay.expectedAmount || 0;
+          if (pay.receivedAmount == null) {
+            pendingThisMonth += pay.expectedAmount || 0;
+          }
+        }
+      });
+    });
+    return { received, dueThisMonth, pendingThisMonth };
+  }, [projects]);
+
   return (
     <div>
       <PageHeader
@@ -43,7 +69,7 @@ export default function ProjectList() {
           <div className="flex items-center gap-2">
             {projects.length > 0 && (
               <IconButton onClick={() => setExportOpen(true)} ariaLabel="Export project">
-                <IcExport size={18} sw={1.9} />
+                <IcDownload size={18} sw={1.9} />
               </IconButton>
             )}
             <IconButton variant="primary" onClick={() => setFormOpen(true)} ariaLabel="Tambah project">
@@ -75,32 +101,63 @@ export default function ProjectList() {
       </div>
 
       {tab === 'active' && active.length > 0 && (
-        <Card className="mb-3.5">
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <div className="text-[12px] text-ink-mute uppercase tracking-[0.3px] font-medium">
-                Modal Aktif
+        <>
+          <Card className="mb-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <div className="text-[12px] text-ink-mute uppercase tracking-[0.3px] font-medium">
+                  Modal Aktif
+                </div>
+                <div
+                  className="font-display text-[20px] font-semibold text-ink mt-0.5"
+                  style={{ fontVariantNumeric: 'tabular-nums' }}
+                >
+                  {formatCurrency(totals.modal)}
+                </div>
               </div>
-              <div
-                className="font-display text-[20px] font-semibold text-ink mt-0.5"
-                style={{ fontVariantNumeric: 'tabular-nums' }}
-              >
-                {formatCurrency(totals.modal)}
+              <div>
+                <div className="text-[12px] text-ink-mute uppercase tracking-[0.3px] font-medium">
+                  Ekspektasi Belum Cair
+                </div>
+                <div
+                  className="font-display text-[20px] font-semibold text-daun mt-0.5"
+                  style={{ fontVariantNumeric: 'tabular-nums' }}
+                >
+                  {formatCurrency(totals.expectedRemaining)}
+                </div>
               </div>
             </div>
-            <div>
-              <div className="text-[12px] text-ink-mute uppercase tracking-[0.3px] font-medium">
-                Ekspektasi Belum Cair
+          </Card>
+
+          <Card className="mb-3.5 !bg-daun-soft !border-daun/30">
+            <div className="flex items-baseline justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[12px] text-daun uppercase tracking-[0.3px] font-semibold">
+                  Return Bulan Ini
+                </div>
+                <div
+                  className="font-display text-[24px] font-semibold text-daun mt-0.5 break-words"
+                  style={{ fontVariantNumeric: 'tabular-nums' }}
+                >
+                  {formatCurrency(monthlyReturn.received)}
+                </div>
               </div>
-              <div
-                className="font-display text-[20px] font-semibold text-daun mt-0.5"
-                style={{ fontVariantNumeric: 'tabular-nums' }}
-              >
-                {formatCurrency(totals.expectedRemaining)}
+              <div className="text-right flex-shrink-0">
+                <div className="text-[11px] text-ink-mute uppercase tracking-[0.3px] font-semibold">
+                  Belum cair bulan ini
+                </div>
+                <div
+                  className={`font-num text-[15px] font-semibold mt-0.5 ${
+                    monthlyReturn.pendingThisMonth > 0 ? 'text-emas' : 'text-ink-mute'
+                  }`}
+                  style={{ fontVariantNumeric: 'tabular-nums' }}
+                >
+                  {formatCurrency(monthlyReturn.pendingThisMonth)}
+                </div>
               </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        </>
       )}
 
       {list.length === 0 ? (
