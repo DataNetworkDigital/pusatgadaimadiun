@@ -171,6 +171,25 @@ export async function ensureDemoFresh() {
   }
 }
 
+// Dev helper: clear lastResetDate so the next /demo visit reseeds.
+// Called via preview_eval after rules are updated; not used in production UI.
+export async function forceDemoReseed() {
+  const settingsRef = doc(db, ...SETTINGS_PATH);
+  await runTransaction(db, async (txn) => {
+    const snap = await txn.get(settingsRef);
+    if (snap.exists()) {
+      txn.update(settingsRef, { lastResetDate: '2020-01-01' });
+    } else {
+      txn.set(settingsRef, {
+        lastResetDate: '2020-01-01',
+        visitorCount: 0,
+        dailyVisitors: 0,
+      });
+    }
+  });
+  return 'lastResetDate cleared — reload /demo to trigger reseed';
+}
+
 let countedThisSession = false;
 
 export async function incrementVisitor() {
