@@ -19,7 +19,7 @@ export default function ConfirmDialog({ open, onClose, onConfirm, title, message
         </div>
       }
     >
-      <p className="text-gray-700 text-sm">{message}</p>
+      <p className="text-ink-soft text-[14px] leading-relaxed">{message}</p>
     </Modal>
   );
 }
