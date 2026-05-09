@@ -374,6 +374,8 @@ export function DataProvider({ children }) {
 
     batch.set(projectRef, {
       name: data.name,
+      ownerName: data.ownerName || null,
+      contractNumber: data.contractNumber || null,
       description: data.description || '',
       principalAmount,
       disbursedAmount,
@@ -383,6 +385,7 @@ export function DataProvider({ children }) {
       paymentDayOfMonth,
       sourceAccountId: data.sourceAccountId,
       proofUrl: data.proofUrl || null,
+      proofFileName: data.proofFileName || null,
       status: 'active',
       payments,
       fundingTransactionId: fundingTxRef.id,
@@ -397,8 +400,11 @@ export function DataProvider({ children }) {
   async function updateProject(id, data) {
     const update = {};
     if (data.name !== undefined) update.name = data.name;
+    if (data.ownerName !== undefined) update.ownerName = data.ownerName;
+    if (data.contractNumber !== undefined) update.contractNumber = data.contractNumber;
     if (data.description !== undefined) update.description = data.description;
     if (data.proofUrl !== undefined) update.proofUrl = data.proofUrl;
+    if (data.proofFileName !== undefined) update.proofFileName = data.proofFileName;
     if (Object.keys(update).length === 0) return;
     await updateDoc(doc(db, C('projects'), id), update);
     toast('Project tersimpan');

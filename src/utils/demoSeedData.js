@@ -171,6 +171,8 @@ export function buildDemoSeed() {
     {
       key: 'proj-active',
       name: 'Modal Toko Sembako Pak Budi',
+      ownerName: 'Pak Budi Santoso',
+      contractNumber: 'SP/2026/03/0042',
       description: 'Pinjaman modal usaha toko sembako, jangka 6 bulan',
       principalAmount: activePrincipal,
       disbursedAmount: 9500000, // upfront discount Rp 500k
@@ -187,6 +189,8 @@ export function buildDemoSeed() {
     {
       key: 'proj-done',
       name: 'Pendanaan Warung Bu Sari',
+      ownerName: 'Ibu Sari',
+      contractNumber: 'SP/2026/01/0011',
       description: 'Modal warung makan, sudah lunas tepat waktu',
       principalAmount: donePrincipal,
       disbursedAmount: donePrincipal,

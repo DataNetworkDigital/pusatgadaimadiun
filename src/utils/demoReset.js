@@ -108,6 +108,8 @@ async function seed() {
     }));
     const data = {
       name: p.name,
+      ownerName: p.ownerName || null,
+      contractNumber: p.contractNumber || null,
       description: p.description || '',
       principalAmount: p.principalAmount,
       disbursedAmount: p.disbursedAmount,
@@ -117,6 +119,7 @@ async function seed() {
       paymentDayOfMonth: p.paymentDayOfMonth,
       sourceAccountId: p.sourceKey ? accountKeyToId[p.sourceKey] : null,
       proofUrl: p.proofUrl || null,
+      proofFileName: null,
       status: p.status,
       payments,
       fundingTransactionId: null,

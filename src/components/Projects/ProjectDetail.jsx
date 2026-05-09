@@ -205,6 +205,12 @@ export default function ProjectDetail() {
 
       <SectionTitle>Detail</SectionTitle>
       <Card className="mb-3.5 !py-1">
+        {project.ownerName && (
+          <StatRow label="Pemilik" value={project.ownerName} />
+        )}
+        {project.contractNumber && (
+          <StatRow label="No. Kontrak" value={project.contractNumber} />
+        )}
         <StatRow
           label="Nilai Project"
           value={formatCurrency(project.principalAmount)}

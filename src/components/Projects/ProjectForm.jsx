@@ -5,14 +5,16 @@ import { formatDateInput, fromDateInput } from '../../utils/formatDate';
 import { calcMonthlyInterest } from '../../utils/projectSchedule';
 import { formatCurrency } from '../../utils/formatCurrency';
 
-const DEFAULT_RETURN_PCT = 4.5;
+const DEFAULT_RETURN_PCT = 5;
 
 export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
   const [name, setName] = useState('');
+  const [ownerName, setOwnerName] = useState('');
+  const [contractNumber, setContractNumber] = useState('');
   const [description, setDescription] = useState('');
   const [principalAmount, setPrincipalAmount] = useState(0);
   const [disbursedAmount, setDisbursedAmount] = useState(0);
-  const [monthlyReturnPct, setMonthlyReturnPct] = useState(DEFAULT_RETURN_PCT);
+  const [monthlyReturnPct, setMonthlyReturnPct] = useState('');
   const [durationMonths, setDurationMonths] = useState(6);
   const [startDate, setStartDate] = useState(formatDateInput(new Date()));
   const [paymentDayOfMonth, setPaymentDayOfMonth] = useState(new Date().getDate());
@@ -24,10 +26,12 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
   useEffect(() => {
     if (open) {
       setName('');
+      setOwnerName('');
+      setContractNumber('');
       setDescription('');
       setPrincipalAmount(0);
       setDisbursedAmount(0);
-      setMonthlyReturnPct(DEFAULT_RETURN_PCT);
+      setMonthlyReturnPct('');
       setDurationMonths(6);
       const today = new Date();
       setStartDate(formatDateInput(today));
@@ -47,7 +51,10 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [principalAmount]);
 
-  const interestPerMonth = calcMonthlyInterest(principalAmount || 0, monthlyReturnPct || 0);
+  const effectiveReturnPct = monthlyReturnPct === '' || monthlyReturnPct == null
+    ? DEFAULT_RETURN_PCT
+    : Number(monthlyReturnPct);
+  const interestPerMonth = calcMonthlyInterest(principalAmount || 0, effectiveReturnPct);
   const totalReturn = interestPerMonth * (Number(durationMonths) || 0);
   const upfrontDiscount = (Number(principalAmount) || 0) - (Number(disbursedAmount) || 0);
 
@@ -83,10 +90,12 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
     try {
       await onSubmit({
         name: name.trim(),
+        ownerName: ownerName.trim() || null,
+        contractNumber: contractNumber.trim() || null,
         description,
         principalAmount,
         disbursedAmount,
-        monthlyReturnPct: Number(monthlyReturnPct),
+        monthlyReturnPct: effectiveReturnPct,
         durationMonths: Number(durationMonths),
         startDate: fromDateInput(startDate),
         paymentDayOfMonth: day,
@@ -130,6 +139,29 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
           />
         </div>
 
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label-text">Pemilik Project (opsional)</label>
+            <input
+              type="text"
+              className="input-field"
+              value={ownerName}
+              onChange={(e) => setOwnerName(e.target.value)}
+              placeholder="cth: Pak Budi"
+            />
+          </div>
+          <div>
+            <label className="label-text">No. Kontrak (opsional)</label>
+            <input
+              type="text"
+              className="input-field"
+              value={contractNumber}
+              onChange={(e) => setContractNumber(e.target.value)}
+              placeholder="cth: SP/2026/04/0123"
+            />
+          </div>
+        </div>
+
         <div>
           <label className="label-text">Nilai Project (basis return)</label>
           <CurrencyInput value={principalAmount} onChange={setPrincipalAmount} />
@@ -161,6 +193,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
               className="input-field"
               value={monthlyReturnPct}
               onChange={(e) => setMonthlyReturnPct(e.target.value)}
+              placeholder={`${DEFAULT_RETURN_PCT}`}
             />
           </div>
           <div>
