@@ -4,7 +4,13 @@ import {
 import { db } from '../firebase';
 import { buildDemoSeed } from './demoSeedData';
 
-const COLLECTIONS = ['demo_accounts', 'demo_transactions', 'demo_debts', 'demo_reminders'];
+const COLLECTIONS = [
+  'demo_accounts',
+  'demo_transactions',
+  'demo_debts',
+  'demo_reminders',
+  'demo_projects',
+];
 const SETTINGS_PATH = ['demo_config', 'settings'];
 
 export function getWIBDateString(date = new Date()) {
@@ -30,7 +36,7 @@ async function clearCollection(name) {
 }
 
 async function seed() {
-  const { accounts, transactions, debts, reminders } = buildDemoSeed();
+  const { accounts, transactions, debts, reminders, projects } = buildDemoSeed();
   const batch = writeBatch(db);
 
   const accountKeyToId = {};
@@ -86,6 +92,38 @@ async function seed() {
       isActive: r.isActive,
       createdAt: serverTimestamp(),
     });
+  }
+
+  for (const p of projects || []) {
+    const ref = doc(collection(db, 'demo_projects'));
+    const payments = (p.payments || []).map((pay) => ({
+      no: pay.no,
+      dueDate: pay.dueDate,
+      type: pay.type,
+      expectedAmount: pay.expectedAmount,
+      receivedAmount: pay.receivedAmount ?? null,
+      receivedDate: pay.receivedDate ?? null,
+      transactionId: pay.transactionId ?? null,
+      accountId: pay.accountKey ? accountKeyToId[pay.accountKey] : null,
+    }));
+    const data = {
+      name: p.name,
+      description: p.description || '',
+      principalAmount: p.principalAmount,
+      disbursedAmount: p.disbursedAmount,
+      monthlyReturnPct: p.monthlyReturnPct,
+      durationMonths: p.durationMonths,
+      startDate: p.startDate,
+      paymentDayOfMonth: p.paymentDayOfMonth,
+      sourceAccountId: p.sourceKey ? accountKeyToId[p.sourceKey] : null,
+      proofUrl: p.proofUrl || null,
+      status: p.status,
+      payments,
+      fundingTransactionId: null,
+      createdAt: p.createdAt || serverTimestamp(),
+    };
+    if (p.closedAt) data.closedAt = p.closedAt;
+    batch.set(ref, data);
   }
 
   await batch.commit();

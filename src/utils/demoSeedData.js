@@ -118,5 +118,90 @@ export function buildDemoSeed() {
     { title: 'Cicilan ke Budi', dayOfMonth: 20, amount: 250000,  accountKey: 'Kas',   isActive: true },
   ];
 
-  return { accounts, transactions, debts, reminders };
+  // Active project: started 2 months ago, 6 months duration, 4.5%/bulan,
+  // payments 1 and 2 already received, payments 3-6 still pending.
+  const activeStart = daysAgo(60);
+  const activeStartTs = ts(activeStart);
+  const projectActivePayments = [];
+  const activePrincipal = 10000000;
+  const activeReturnPct = 4.5;
+  const activeInterest = Math.round((activePrincipal * activeReturnPct) / 100);
+  for (let i = 1; i <= 6; i++) {
+    const due = new Date(activeStart);
+    due.setMonth(due.getMonth() + i);
+    const isFinal = i === 6;
+    const expected = isFinal ? activeInterest + activePrincipal : activeInterest;
+    const received = i <= 2;
+    projectActivePayments.push({
+      no: i,
+      dueDate: ts(due),
+      type: isFinal ? 'final' : 'interest',
+      expectedAmount: expected,
+      receivedAmount: received ? expected : null,
+      receivedDate: received ? ts(new Date(due.getTime() - 86400000 * 2)) : null,
+      transactionId: null,
+      accountKey: received ? 'BCA' : null,
+    });
+  }
+
+  // Completed project: 3 months duration, all paid, BCA account
+  const doneStart = daysAgo(120);
+  const donePrincipal = 5000000;
+  const doneReturnPct = 5;
+  const doneInterest = Math.round((donePrincipal * doneReturnPct) / 100);
+  const projectDonePayments = [];
+  for (let i = 1; i <= 3; i++) {
+    const due = new Date(doneStart);
+    due.setMonth(due.getMonth() + i);
+    const isFinal = i === 3;
+    const expected = isFinal ? doneInterest + donePrincipal : doneInterest;
+    projectDonePayments.push({
+      no: i,
+      dueDate: ts(due),
+      type: isFinal ? 'final' : 'interest',
+      expectedAmount: expected,
+      receivedAmount: expected,
+      receivedDate: ts(due),
+      transactionId: null,
+      accountKey: 'BCA',
+    });
+  }
+
+  const projects = [
+    {
+      key: 'proj-active',
+      name: 'Modal Toko Sembako Pak Budi',
+      description: 'Pinjaman modal usaha toko sembako, jangka 6 bulan',
+      principalAmount: activePrincipal,
+      disbursedAmount: 9500000, // upfront discount Rp 500k
+      monthlyReturnPct: activeReturnPct,
+      durationMonths: 6,
+      startDate: activeStartTs,
+      paymentDayOfMonth: activeStart.getDate(),
+      sourceKey: 'BCA',
+      status: 'active',
+      payments: projectActivePayments,
+      proofUrl: null,
+      createdAt: activeStartTs,
+    },
+    {
+      key: 'proj-done',
+      name: 'Pendanaan Warung Bu Sari',
+      description: 'Modal warung makan, sudah lunas tepat waktu',
+      principalAmount: donePrincipal,
+      disbursedAmount: donePrincipal,
+      monthlyReturnPct: doneReturnPct,
+      durationMonths: 3,
+      startDate: ts(doneStart),
+      paymentDayOfMonth: doneStart.getDate(),
+      sourceKey: 'BCA',
+      status: 'completed',
+      closedAt: ts(new Date(doneStart.getTime() + 86400000 * 91)),
+      payments: projectDonePayments,
+      proofUrl: null,
+      createdAt: ts(doneStart),
+    },
+  ];
+
+  return { accounts, transactions, debts, reminders, projects };
 }
