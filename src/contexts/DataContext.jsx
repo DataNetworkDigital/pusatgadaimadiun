@@ -6,13 +6,16 @@ import {
 import { db } from '../firebase';
 import { useAuth } from './AuthContext';
 import { useDemo } from './DemoContext';
+import { useToast } from './ToastContext';
 
 const DataContext = createContext(null);
 
 export function DataProvider({ children }) {
   const { isUnlocked } = useAuth();
   const { collectionPrefix, isDemo } = useDemo();
+  const { showToast } = useToast();
   const C = (name) => `${collectionPrefix}${name}`;
+  const toast = (msg) => showToast?.(msg);
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [debts, setDebts] = useState([]);
@@ -51,13 +54,15 @@ export function DataProvider({ children }) {
 
   // ===== Accounts =====
   async function addAccount(data) {
-    return addDoc(collection(db, C('accounts')), {
+    const ref = await addDoc(collection(db, C('accounts')), {
       name: data.name,
       accountNumber: data.accountNumber || '',
       balance: Number(data.balance) || 0,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+    toast('Rekening berhasil ditambahkan');
+    return ref;
   }
 
   async function updateAccount(id, data) {
@@ -65,11 +70,13 @@ export function DataProvider({ children }) {
     if (data.name !== undefined) update.name = data.name;
     if (data.accountNumber !== undefined) update.accountNumber = data.accountNumber;
     if (data.balance !== undefined) update.balance = Number(data.balance);
-    return updateDoc(doc(db, C('accounts'), id), update);
+    await updateDoc(doc(db, C('accounts'), id), update);
+    toast('Rekening tersimpan');
   }
 
   async function deleteAccount(id) {
-    return deleteDoc(doc(db, C('accounts'), id));
+    await deleteDoc(doc(db, C('accounts'), id));
+    toast('Rekening dihapus');
   }
 
   // ===== Transactions =====
@@ -99,6 +106,7 @@ export function DataProvider({ children }) {
       batch.update(doc(db, C('accounts'), data.toAccount), { balance: increment(amt), updatedAt: serverTimestamp() });
     }
     await batch.commit();
+    toast('Transaksi berhasil disimpan');
     return txRef.id;
   }
 
@@ -131,6 +139,7 @@ export function DataProvider({ children }) {
     }
     batch.delete(doc(db, C('transactions'), id));
     await batch.commit();
+    toast('Transaksi dihapus');
   }
 
   async function updateTransaction(id, newData) {
@@ -182,12 +191,13 @@ export function DataProvider({ children }) {
       }
     }
     await batch.commit();
+    toast('Transaksi diperbarui');
   }
 
   // ===== Debts =====
   async function addDebt(data) {
     const totalAmount = Number(data.totalAmount);
-    return addDoc(collection(db, C('debts')), {
+    const ref = await addDoc(collection(db, C('debts')), {
       type: data.type,
       personName: data.personName,
       totalAmount,
@@ -199,6 +209,8 @@ export function DataProvider({ children }) {
       installments: [],
       createdAt: serverTimestamp(),
     });
+    toast(data.type === 'utang' ? 'Utang ditambahkan' : 'Piutang ditambahkan');
+    return ref;
   }
 
   async function updateDebt(id, data) {
@@ -210,11 +222,13 @@ export function DataProvider({ children }) {
     if (data.dueDate !== undefined) update.dueDate = data.dueDate instanceof Date ? Timestamp.fromDate(data.dueDate) : data.dueDate;
     if (data.description !== undefined) update.description = data.description;
     if (data.status !== undefined) update.status = data.status;
-    return updateDoc(doc(db, C('debts'), id), update);
+    await updateDoc(doc(db, C('debts'), id), update);
+    toast('Catatan tersimpan');
   }
 
   async function deleteDebt(id) {
-    return deleteDoc(doc(db, C('debts'), id));
+    await deleteDoc(doc(db, C('debts'), id));
+    toast('Catatan dihapus');
   }
 
   async function payInstallment(debtId, amount, accountId) {
@@ -257,11 +271,12 @@ export function DataProvider({ children }) {
     });
 
     await batch.commit();
+    toast(debt.type === 'utang' ? 'Cicilan dibayar' : 'Cicilan diterima');
   }
 
   // ===== Reminders =====
   async function addReminder(data) {
-    return addDoc(collection(db, C('reminders')), {
+    const ref = await addDoc(collection(db, C('reminders')), {
       title: data.title,
       dayOfMonth: Number(data.dayOfMonth),
       amount: data.amount ? Number(data.amount) : null,
@@ -269,14 +284,20 @@ export function DataProvider({ children }) {
       isActive: data.isActive !== false,
       createdAt: serverTimestamp(),
     });
+    toast('Reminder ditambahkan');
+    return ref;
   }
 
   async function updateReminder(id, data) {
-    return updateDoc(doc(db, C('reminders'), id), data);
+    await updateDoc(doc(db, C('reminders'), id), data);
+    if (!('isActive' in data && Object.keys(data).length === 1)) {
+      toast('Reminder tersimpan');
+    }
   }
 
   async function deleteReminder(id) {
-    return deleteDoc(doc(db, C('reminders'), id));
+    await deleteDoc(doc(db, C('reminders'), id));
+    toast('Reminder dihapus');
   }
 
   // ===== Reset =====
@@ -288,6 +309,7 @@ export function DataProvider({ children }) {
       snap.docs.forEach((d) => batch.delete(d.ref));
       await batch.commit();
     }
+    toast('Semua data telah direset');
   }
 
   const totalBalance = useMemo(

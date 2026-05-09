@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
 import { DemoProvider } from './contexts/DemoContext';
+import { ToastProvider } from './contexts/ToastContext';
 import PinScreen from './components/PinLock/PinScreen';
 import AppLayout from './components/Layout/AppLayout';
 import DashboardPage from './components/Dashboard/DashboardPage';
@@ -98,28 +99,30 @@ export default function App() {
   }
   return (
     <HashRouter>
-      <Routes>
-        <Route
-          path="/demo/*"
-          element={
-            <DemoProvider isDemo>
-              <AuthProvider>
-                <DemoGate />
-              </AuthProvider>
-            </DemoProvider>
-          }
-        />
-        <Route
-          path="/*"
-          element={
-            <DemoProvider>
-              <AuthProvider>
-                <RealGate />
-              </AuthProvider>
-            </DemoProvider>
-          }
-        />
-      </Routes>
+      <ToastProvider>
+        <Routes>
+          <Route
+            path="/demo/*"
+            element={
+              <DemoProvider isDemo>
+                <AuthProvider>
+                  <DemoGate />
+                </AuthProvider>
+              </DemoProvider>
+            }
+          />
+          <Route
+            path="/*"
+            element={
+              <DemoProvider>
+                <AuthProvider>
+                  <RealGate />
+                </AuthProvider>
+              </DemoProvider>
+            }
+          />
+        </Routes>
+      </ToastProvider>
     </HashRouter>
   );
 }
