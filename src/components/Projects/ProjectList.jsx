@@ -5,14 +5,17 @@ import IconButton from '../common/IconButton';
 import Card from '../common/Card';
 import ProjectCard from './ProjectCard';
 import ProjectForm from './ProjectForm';
+import ExportSheet from './ExportSheet';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { projectSummary } from '../../utils/projectSchedule';
-import { IcPlus } from '../common/icons';
+import { exportProjectsToExcel, exportProjectsToPdf } from '../../utils/projectExport';
+import { IcPlus, IcExport } from '../common/icons';
 
 export default function ProjectList() {
   const { projects, accounts, addProject } = useData();
   const [tab, setTab] = useState('active');
   const [formOpen, setFormOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const active = useMemo(() => projects.filter((p) => p.status === 'active'), [projects]);
   const archived = useMemo(
@@ -37,9 +40,16 @@ export default function ProjectList() {
         title="Project"
         subtitle={`${active.length} aktif · ${archived.length} riwayat`}
         action={
-          <IconButton variant="primary" onClick={() => setFormOpen(true)} ariaLabel="Tambah project">
-            <IcPlus size={20} sw={2.2} />
-          </IconButton>
+          <div className="flex items-center gap-2">
+            {projects.length > 0 && (
+              <IconButton onClick={() => setExportOpen(true)} ariaLabel="Export project">
+                <IcExport size={18} sw={1.9} />
+              </IconButton>
+            )}
+            <IconButton variant="primary" onClick={() => setFormOpen(true)} ariaLabel="Tambah project">
+              <IcPlus size={20} sw={2.2} />
+            </IconButton>
+          </div>
         }
       />
 
@@ -127,6 +137,13 @@ export default function ProjectList() {
         onClose={() => setFormOpen(false)}
         onSubmit={addProject}
         accounts={accounts}
+      />
+      <ExportSheet
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        onExportExcel={() => exportProjectsToExcel(projects, accounts)}
+        onExportPdf={(mode) => exportProjectsToPdf(projects, accounts, mode)}
+        counts={{ active: active.length, archive: archived.length, total: projects.length }}
       />
     </div>
   );
