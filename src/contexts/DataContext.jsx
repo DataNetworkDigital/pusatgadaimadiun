@@ -7,6 +7,7 @@ import { db } from '../firebase';
 import { useAuth } from './AuthContext';
 import { useDemo } from './DemoContext';
 import { useToast } from './ToastContext';
+import { generateProjectSchedule } from '../utils/projectSchedule';
 
 const DataContext = createContext(null);
 
@@ -20,35 +21,65 @@ export function DataProvider({ children }) {
   const [transactions, setTransactions] = useState([]);
   const [debts, setDebts] = useState([]);
   const [reminders, setReminders] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!isDemo && !isUnlocked) return;
     setLoading(true);
-    const loaded = { a: false, t: false, d: false, r: false };
+    const loaded = { a: false, t: false, d: false, r: false, p: false };
     const markLoaded = (k) => {
       loaded[k] = true;
-      if (loaded.a && loaded.t && loaded.d && loaded.r) setLoading(false);
+      if (loaded.a && loaded.t && loaded.d && loaded.r && loaded.p) setLoading(false);
     };
 
-    const unsubA = onSnapshot(query(collection(db, C('accounts')), orderBy('createdAt', 'asc')), (snap) => {
-      setAccounts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      markLoaded('a');
-    });
-    const unsubT = onSnapshot(query(collection(db, C('transactions')), orderBy('date', 'desc')), (snap) => {
-      setTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      markLoaded('t');
-    });
-    const unsubD = onSnapshot(query(collection(db, C('debts')), orderBy('createdAt', 'desc')), (snap) => {
-      setDebts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      markLoaded('d');
-    });
-    const unsubR = onSnapshot(query(collection(db, C('reminders')), orderBy('createdAt', 'desc')), (snap) => {
-      setReminders(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      markLoaded('r');
-    });
+    const onErr = (k) => (err) => {
+      console.warn(`Snapshot ${k} failed:`, err?.code || err?.message);
+      markLoaded(k);
+    };
 
-    return () => { unsubA(); unsubT(); unsubD(); unsubR(); };
+    const unsubA = onSnapshot(
+      query(collection(db, C('accounts')), orderBy('createdAt', 'asc')),
+      (snap) => {
+        setAccounts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        markLoaded('a');
+      },
+      onErr('a')
+    );
+    const unsubT = onSnapshot(
+      query(collection(db, C('transactions')), orderBy('date', 'desc')),
+      (snap) => {
+        setTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        markLoaded('t');
+      },
+      onErr('t')
+    );
+    const unsubD = onSnapshot(
+      query(collection(db, C('debts')), orderBy('createdAt', 'desc')),
+      (snap) => {
+        setDebts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        markLoaded('d');
+      },
+      onErr('d')
+    );
+    const unsubR = onSnapshot(
+      query(collection(db, C('reminders')), orderBy('createdAt', 'desc')),
+      (snap) => {
+        setReminders(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        markLoaded('r');
+      },
+      onErr('r')
+    );
+    const unsubP = onSnapshot(
+      query(collection(db, C('projects')), orderBy('createdAt', 'desc')),
+      (snap) => {
+        setProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        markLoaded('p');
+      },
+      onErr('p')
+    );
+
+    return () => { unsubA(); unsubT(); unsubD(); unsubR(); unsubP(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isUnlocked, isDemo, collectionPrefix]);
 
@@ -300,9 +331,205 @@ export function DataProvider({ children }) {
     toast('Reminder dihapus');
   }
 
+  // ===== Projects =====
+  async function addProject(data) {
+    const principalAmount = Number(data.principalAmount) || 0;
+    const disbursedAmount = Number(data.disbursedAmount) || 0;
+    const monthlyReturnPct = Number(data.monthlyReturnPct) || 0;
+    const durationMonths = Number(data.durationMonths) || 0;
+    const startDate = data.startDate instanceof Date ? data.startDate : data.startDate?.toDate?.() || new Date();
+    const paymentDayOfMonth = Number(data.paymentDayOfMonth) || startDate.getDate();
+    if (!data.sourceAccountId) throw new Error('Pilih rekening sumber pendanaan');
+    if (principalAmount <= 0) throw new Error('Nilai project harus lebih dari 0');
+    if (disbursedAmount <= 0) throw new Error('Modal keluar harus lebih dari 0');
+    if (durationMonths <= 0) throw new Error('Durasi project minimal 1 bulan');
+
+    const payments = generateProjectSchedule({
+      principalAmount,
+      monthlyReturnPct,
+      durationMonths,
+      startDate,
+      paymentDayOfMonth,
+    });
+
+    const batch = writeBatch(db);
+    const projectRef = doc(collection(db, C('projects')));
+    const fundingTxRef = doc(collection(db, C('transactions')));
+
+    batch.set(fundingTxRef, {
+      type: 'expense',
+      amount: disbursedAmount,
+      description: `Pendanaan project: ${data.name}`,
+      date: Timestamp.fromDate(startDate),
+      fromAccount: data.sourceAccountId,
+      toAccount: null,
+      debtId: null,
+      projectId: projectRef.id,
+      createdAt: serverTimestamp(),
+    });
+    batch.update(doc(db, C('accounts'), data.sourceAccountId), {
+      balance: increment(-disbursedAmount),
+      updatedAt: serverTimestamp(),
+    });
+
+    batch.set(projectRef, {
+      name: data.name,
+      description: data.description || '',
+      principalAmount,
+      disbursedAmount,
+      monthlyReturnPct,
+      durationMonths,
+      startDate: Timestamp.fromDate(startDate),
+      paymentDayOfMonth,
+      sourceAccountId: data.sourceAccountId,
+      proofUrl: data.proofUrl || null,
+      status: 'active',
+      payments,
+      fundingTransactionId: fundingTxRef.id,
+      createdAt: serverTimestamp(),
+    });
+
+    await batch.commit();
+    toast('Project berhasil dibuat');
+    return projectRef.id;
+  }
+
+  async function updateProject(id, data) {
+    const update = {};
+    if (data.name !== undefined) update.name = data.name;
+    if (data.description !== undefined) update.description = data.description;
+    if (data.proofUrl !== undefined) update.proofUrl = data.proofUrl;
+    if (Object.keys(update).length === 0) return;
+    await updateDoc(doc(db, C('projects'), id), update);
+    toast('Project tersimpan');
+  }
+
+  async function recordProjectPayment(projectId, paymentNo, { accountId, amount, date }) {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Project tidak ditemukan');
+    const payment = (project.payments || []).find((p) => p.no === paymentNo);
+    if (!payment) throw new Error('Pembayaran tidak ditemukan');
+    if (payment.receivedAmount != null) throw new Error('Pembayaran sudah dikonfirmasi');
+    const amt = Number(amount);
+    if (amt <= 0) throw new Error('Jumlah harus lebih dari 0');
+    if (!accountId) throw new Error('Pilih rekening tujuan');
+
+    const recvDate = date instanceof Date ? date : new Date();
+    const batch = writeBatch(db);
+    const txRef = doc(collection(db, C('transactions')));
+
+    batch.set(txRef, {
+      type: 'income',
+      amount: amt,
+      description:
+        payment.type === 'final'
+          ? `Pelunasan project: ${project.name}`
+          : `Return bulanan project: ${project.name}`,
+      date: Timestamp.fromDate(recvDate),
+      fromAccount: null,
+      toAccount: accountId,
+      debtId: null,
+      projectId,
+      paymentNo,
+      createdAt: serverTimestamp(),
+    });
+    batch.update(doc(db, C('accounts'), accountId), {
+      balance: increment(amt),
+      updatedAt: serverTimestamp(),
+    });
+
+    const updatedPayments = (project.payments || []).map((p) =>
+      p.no === paymentNo
+        ? {
+            ...p,
+            receivedAmount: amt,
+            receivedDate: Timestamp.fromDate(recvDate),
+            transactionId: txRef.id,
+            accountId,
+          }
+        : p
+    );
+    const allPaid =
+      updatedPayments.length > 0 && updatedPayments.every((p) => p.receivedAmount != null);
+    const update = { payments: updatedPayments };
+    if (allPaid && project.status === 'active') {
+      update.status = 'completed';
+      update.closedAt = Timestamp.fromDate(recvDate);
+    }
+    batch.update(doc(db, C('projects'), projectId), update);
+
+    await batch.commit();
+    toast(payment.type === 'final' ? 'Pelunasan project tercatat' : 'Pembayaran tercatat');
+  }
+
+  async function closeProjectAsDefault(projectId, { recoveredAmount = 0, accountId, date } = {}) {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Project tidak ditemukan');
+    const recv = Number(recoveredAmount) || 0;
+    const closeDate = date instanceof Date ? date : new Date();
+
+    const batch = writeBatch(db);
+    let recoveryTxId = null;
+    if (recv > 0) {
+      if (!accountId) throw new Error('Pilih rekening tujuan untuk pengembalian');
+      const txRef = doc(collection(db, C('transactions')));
+      recoveryTxId = txRef.id;
+      batch.set(txRef, {
+        type: 'income',
+        amount: recv,
+        description: `Pengembalian sisa project: ${project.name}`,
+        date: Timestamp.fromDate(closeDate),
+        fromAccount: null,
+        toAccount: accountId,
+        debtId: null,
+        projectId,
+        createdAt: serverTimestamp(),
+      });
+      batch.update(doc(db, C('accounts'), accountId), {
+        balance: increment(recv),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    const totalReceived =
+      (project.payments || []).reduce((s, p) => s + (p.receivedAmount || 0), 0) + recv;
+    const lossAmount = Math.max(0, (project.disbursedAmount || 0) - totalReceived);
+
+    batch.update(doc(db, C('projects'), projectId), {
+      status: 'default',
+      closedAt: Timestamp.fromDate(closeDate),
+      finalRecovery: recv,
+      finalRecoveryTransactionId: recoveryTxId,
+      lossAmount,
+    });
+
+    await batch.commit();
+    toast(lossAmount > 0 ? 'Project ditutup, kerugian dicatat' : 'Project ditutup (BEP)');
+  }
+
+  async function deleteProject(id) {
+    const project = projects.find((p) => p.id === id);
+    if (!project) return;
+    const hasReceived = (project.payments || []).some((p) => p.receivedAmount != null);
+    if (hasReceived) {
+      throw new Error('Project sudah ada pembayaran masuk. Tutup project alih-alih menghapus.');
+    }
+    const batch = writeBatch(db);
+    if (project.fundingTransactionId) {
+      batch.delete(doc(db, C('transactions'), project.fundingTransactionId));
+      batch.update(doc(db, C('accounts'), project.sourceAccountId), {
+        balance: increment(project.disbursedAmount || 0),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    batch.delete(doc(db, C('projects'), id));
+    await batch.commit();
+    toast('Project dihapus');
+  }
+
   // ===== Reset =====
   async function resetAllData() {
-    const collections = ['accounts', 'transactions', 'debts', 'reminders'];
+    const collections = ['accounts', 'transactions', 'debts', 'reminders', 'projects'];
     for (const col of collections) {
       const snap = await getDocs(collection(db, C(col)));
       const batch = writeBatch(db);
@@ -318,11 +545,12 @@ export function DataProvider({ children }) {
   );
 
   const value = {
-    accounts, transactions, debts, reminders, loading, totalBalance,
+    accounts, transactions, debts, reminders, projects, loading, totalBalance,
     addAccount, updateAccount, deleteAccount,
     addTransaction, updateTransaction, deleteTransaction,
     addDebt, updateDebt, deleteDebt, payInstallment,
     addReminder, updateReminder, deleteReminder,
+    addProject, updateProject, recordProjectPayment, closeProjectAsDefault, deleteProject,
     resetAllData,
   };
 

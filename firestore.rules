@@ -34,6 +34,7 @@ service cloud.firestore {
     match /transactions/{id}  { allow read, write: if signedIn(); }
     match /debts/{id}         { allow read, write: if signedIn(); }
     match /reminders/{id}     { allow read, write: if signedIn(); }
+    match /projects/{id}      { allow read, write: if signedIn(); }
 
     // ===== Demo (public) =====
 
@@ -42,6 +43,7 @@ service cloud.firestore {
     match /demo_transactions/{id}  { allow read, write: if true; }
     match /demo_debts/{id}         { allow read, write: if true; }
     match /demo_reminders/{id}     { allow read, write: if true; }
+    match /demo_projects/{id}      { allow read, write: if true; }
 
     // Catch-all
     match /{document=**} {
