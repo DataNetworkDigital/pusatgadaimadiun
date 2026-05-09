@@ -1,12 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Modal from '../common/Modal';
 import CurrencyInput from '../common/CurrencyInput';
 import { formatDateInput, fromDateInput } from '../../utils/formatDate';
 import { calcMonthlyInterest } from '../../utils/projectSchedule';
 import { formatCurrency } from '../../utils/formatCurrency';
-import { uploadProjectProof, validateProofFile } from '../../utils/projectUpload';
-import { useDemo } from '../../contexts/DemoContext';
-import { IcInfo, IcTrash, IcExport } from '../common/icons';
 
 const DEFAULT_RETURN_PCT = 5;
 
@@ -23,10 +20,6 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
   const [paymentDayOfMonth, setPaymentDayOfMonth] = useState(new Date().getDate());
   const [sourceAccountId, setSourceAccountId] = useState('');
   const [proofUrl, setProofUrl] = useState('');
-  const [proofFileName, setProofFileName] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef(null);
-  const { isDemo } = useDemo();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -45,9 +38,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
       setPaymentDayOfMonth(today.getDate());
       setSourceAccountId(accounts?.[0]?.id || '');
       setProofUrl('');
-      setProofFileName('');
       setError('');
-      setUploading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -66,34 +57,6 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
   const interestPerMonth = calcMonthlyInterest(principalAmount || 0, effectiveReturnPct);
   const totalReturn = interestPerMonth * (Number(durationMonths) || 0);
   const upfrontDiscount = (Number(principalAmount) || 0) - (Number(disbursedAmount) || 0);
-
-  async function handleFilePick(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const valErr = validateProofFile(file);
-    if (valErr) {
-      setError(valErr);
-      e.target.value = '';
-      return;
-    }
-    setError('');
-    setUploading(true);
-    try {
-      const { url, fileName } = await uploadProjectProof(file, { isDemo });
-      setProofUrl(url);
-      setProofFileName(fileName);
-    } catch (err) {
-      setError(err.message || 'Gagal upload file');
-    } finally {
-      setUploading(false);
-      e.target.value = '';
-    }
-  }
-
-  function handleRemoveProof() {
-    setProofUrl('');
-    setProofFileName('');
-  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -138,7 +101,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
         paymentDayOfMonth: day,
         sourceAccountId,
         proofUrl: proofUrl.trim() || null,
-        proofFileName: proofFileName || null,
+        proofFileName: null,
       });
       onClose();
     } catch (e) {
@@ -320,59 +283,17 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
         </div>
 
         <div>
-          <label className="label-text">Bukti / Kontrak (opsional)</label>
-          {proofFileName ? (
-            <div className="flex items-center gap-2 px-3 py-2.5 bg-indigo-soft border border-indigo/20 rounded-xl text-[13px] text-indigo">
-              <IcInfo size={14} sw={2} />
-              <span className="flex-1 truncate font-medium">{proofFileName}</span>
-              <a
-                href={proofUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-semibold underline-offset-2 hover:underline"
-              >
-                Lihat
-              </a>
-              <button
-                type="button"
-                onClick={handleRemoveProof}
-                aria-label="Hapus file"
-                className="w-7 h-7 rounded-lg bg-terra-soft text-terra flex items-center justify-center active:opacity-80"
-              >
-                <IcTrash size={14} sw={2} />
-              </button>
-            </div>
-          ) : (
-            <>
-              <input
-                type="url"
-                className="input-field"
-                value={proofUrl}
-                onChange={(e) => setProofUrl(e.target.value)}
-                placeholder="https://… (paste link Drive/Dropbox)"
-              />
-              <div className="mt-2 flex items-center gap-2 text-[12px] text-ink-mute">
-                <span>atau</span>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-paper border border-line text-ink-soft font-semibold active:bg-cream-deep disabled:opacity-50"
-                >
-                  <IcExport size={14} sw={2} />
-                  {uploading ? 'Mengunggah…' : 'Upload File'}
-                </button>
-                <span className="text-[11px] text-ink-mute">PDF/JPG/PNG · maks 8 MB</span>
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="application/pdf,image/jpeg,image/png,image/heic,image/webp"
-                onChange={handleFilePick}
-                className="hidden"
-              />
-            </>
-          )}
+          <label className="label-text">Link Bukti / Kontrak (opsional)</label>
+          <input
+            type="url"
+            className="input-field"
+            value={proofUrl}
+            onChange={(e) => setProofUrl(e.target.value)}
+            placeholder="https://…"
+          />
+          <p className="text-[11px] text-ink-mute mt-1.5 leading-snug">
+            Upload dokumen ke Google Drive / Dropbox / OneDrive, lalu paste link-nya di sini.
+          </p>
         </div>
 
         {accounts?.length === 0 && (

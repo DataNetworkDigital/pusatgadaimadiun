@@ -6,17 +6,21 @@ import Card from '../common/Card';
 import ProjectCard from './ProjectCard';
 import ProjectForm from './ProjectForm';
 import ExportSheet from './ExportSheet';
+import PeriodPickerSheet, { resolvePeriod } from './PeriodPickerSheet';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { projectSummary } from '../../utils/projectSchedule';
 import { exportProjectsToExcel, exportProjectsToPdf } from '../../utils/projectExport';
-import { startOfMonth, endOfMonth, toDate } from '../../utils/formatDate';
-import { IcPlus, IcDownload } from '../common/icons';
+import { toDate, formatDate } from '../../utils/formatDate';
+import { IcPlus, IcDownload, IcChevronRight } from '../common/icons';
 
 export default function ProjectList() {
   const { projects, accounts, addProject } = useData();
   const [tab, setTab] = useState('active');
   const [formOpen, setFormOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [period, setPeriod] = useState({ id: 'this-month' });
+  const [periodOpen, setPeriodOpen] = useState(false);
+  const range = useMemo(() => resolvePeriod(period), [period]);
 
   const active = useMemo(() => projects.filter((p) => p.status === 'active'), [projects]);
   const archived = useMemo(
@@ -35,30 +39,27 @@ export default function ProjectList() {
     return { modal, expectedRemaining };
   }, [active]);
 
-  const monthlyReturn = useMemo(() => {
-    const now = new Date();
-    const mStart = startOfMonth(now);
-    const mEnd = endOfMonth(now);
+  const periodReturn = useMemo(() => {
     let received = 0;
-    let dueThisMonth = 0;
-    let pendingThisMonth = 0;
+    let pending = 0;
+    let receivedCount = 0;
     projects.forEach((p) => {
       (p.payments || []).forEach((pay) => {
         const due = toDate(pay.dueDate);
         const recv = toDate(pay.receivedDate);
-        if (recv && recv >= mStart && recv <= mEnd) {
+        const inRangeRecv = recv && (!range.from || recv >= range.from) && (!range.to || recv <= range.to);
+        const inRangeDue = due && (!range.from || due >= range.from) && (!range.to || due <= range.to);
+        if (inRangeRecv) {
           received += pay.receivedAmount || 0;
+          receivedCount += 1;
         }
-        if (due && due >= mStart && due <= mEnd) {
-          dueThisMonth += pay.expectedAmount || 0;
-          if (pay.receivedAmount == null) {
-            pendingThisMonth += pay.expectedAmount || 0;
-          }
+        if (inRangeDue && pay.receivedAmount == null) {
+          pending += pay.expectedAmount || 0;
         }
       });
     });
-    return { received, dueThisMonth, pendingThisMonth };
-  }, [projects]);
+    return { received, pending, receivedCount };
+  }, [projects, range]);
 
   return (
     <div>
@@ -130,29 +131,46 @@ export default function ProjectList() {
           </Card>
 
           <Card className="mb-3.5 !bg-daun-soft !border-daun/30">
+            <button
+              type="button"
+              onClick={() => setPeriodOpen(true)}
+              className="w-full flex items-center justify-between gap-2 -mx-1 -mt-0.5 mb-2 active:opacity-80"
+            >
+              <div className="text-[12px] text-daun uppercase tracking-[0.3px] font-semibold">
+                Return · {range.label}
+                {range.from && range.to && period.id === 'custom'
+                  ? ` (${formatDate(range.from, { short: true })} – ${formatDate(range.to, {
+                      short: true,
+                    })})`
+                  : ''}
+              </div>
+              <span className="text-[11px] text-daun font-semibold flex items-center gap-0.5">
+                Ubah <IcChevronRight size={12} stroke="#5C8A4E" sw={2.4} />
+              </span>
+            </button>
             <div className="flex items-baseline justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[12px] text-daun uppercase tracking-[0.3px] font-semibold">
-                  Return Bulan Ini
-                </div>
                 <div
-                  className="font-display text-[24px] font-semibold text-daun mt-0.5 break-words"
+                  className="font-display text-[24px] font-semibold text-daun break-words"
                   style={{ fontVariantNumeric: 'tabular-nums' }}
                 >
-                  {formatCurrency(monthlyReturn.received)}
+                  {formatCurrency(periodReturn.received)}
+                </div>
+                <div className="text-[11px] text-ink-mute mt-0.5">
+                  {periodReturn.receivedCount} pembayaran diterima
                 </div>
               </div>
               <div className="text-right flex-shrink-0">
                 <div className="text-[11px] text-ink-mute uppercase tracking-[0.3px] font-semibold">
-                  Belum cair bulan ini
+                  Belum cair
                 </div>
                 <div
                   className={`font-num text-[15px] font-semibold mt-0.5 ${
-                    monthlyReturn.pendingThisMonth > 0 ? 'text-emas' : 'text-ink-mute'
+                    periodReturn.pending > 0 ? 'text-emas' : 'text-ink-mute'
                   }`}
                   style={{ fontVariantNumeric: 'tabular-nums' }}
                 >
-                  {formatCurrency(monthlyReturn.pendingThisMonth)}
+                  {formatCurrency(periodReturn.pending)}
                 </div>
               </div>
             </div>
@@ -198,9 +216,15 @@ export default function ProjectList() {
       <ExportSheet
         open={exportOpen}
         onClose={() => setExportOpen(false)}
-        onExportExcel={() => exportProjectsToExcel(projects, accounts)}
-        onExportPdf={(mode) => exportProjectsToPdf(projects, accounts, mode)}
+        onExportExcel={(filter) => exportProjectsToExcel(projects, accounts, filter)}
+        onExportPdf={(mode, filter) => exportProjectsToPdf(projects, accounts, mode, filter)}
         counts={{ active: active.length, archive: archived.length, total: projects.length }}
+      />
+      <PeriodPickerSheet
+        open={periodOpen}
+        onClose={() => setPeriodOpen(false)}
+        value={period}
+        onChange={setPeriod}
       />
     </div>
   );

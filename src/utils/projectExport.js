@@ -66,10 +66,37 @@ function downloadFilenameStamp() {
   ).padStart(2, '0')}`;
 }
 
-export function exportProjectsToExcel(projects, accounts) {
+function inDateRange(date, filter) {
+  if (!filter) return true;
+  const d = toDate(date);
+  if (!d) return false;
+  const from = new Date(filter.from);
+  from.setHours(0, 0, 0, 0);
+  const to = new Date(filter.to);
+  to.setHours(23, 59, 59, 999);
+  return d >= from && d <= to;
+}
+
+function projectsTouchedByFilter(projects, filter) {
+  if (!filter) return projects;
+  return projects.filter((p) =>
+    (p.payments || []).some(
+      (pay) => pay.receivedDate && inDateRange(pay.receivedDate, filter)
+    )
+  );
+}
+
+function buildPeriodLabel(filter) {
+  if (!filter) return '';
+  const fmt = (d) => formatDate(d, { short: true });
+  return ` · ${fmt(filter.from)} – ${fmt(filter.to)}`;
+}
+
+export function exportProjectsToExcel(projects, accounts, filter = null) {
   const accountName = (id) => accounts.find((a) => a.id === id)?.name || '';
-  const active = projects.filter((p) => p.status === 'active');
-  const archive = projects.filter((p) => p.status === 'completed' || p.status === 'default');
+  const sourceList = filter ? projectsTouchedByFilter(projects, filter) : projects;
+  const active = sourceList.filter((p) => p.status === 'active');
+  const archive = sourceList.filter((p) => p.status === 'completed' || p.status === 'default');
 
   const wb = XLSX.utils.book_new();
 
@@ -89,10 +116,11 @@ export function exportProjectsToExcel(projects, accounts) {
   sheetArchive['!cols'] = sheetActive['!cols'];
   XLSX.utils.book_append_sheet(wb, sheetArchive, 'Riwayat');
 
-  // Sheet: Jadwal Pembayaran (semua project)
+  // Sheet: Jadwal Pembayaran (filtered by receivedDate when filter set)
   const allPayments = [];
-  projects.forEach((p) => {
+  sourceList.forEach((p) => {
     (p.payments || []).forEach((pay) => {
+      if (filter && !(pay.receivedDate && inDateRange(pay.receivedDate, filter))) return;
       allPayments.push(paymentRow(p, pay, accountName));
     });
   });
@@ -135,16 +163,18 @@ function projectsToPdfRows(list, accountName) {
   });
 }
 
-export function exportProjectsToPdf(projects, accounts, mode = 'all') {
+export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = null) {
   const accountName = (id) => accounts.find((a) => a.id === id)?.name || '';
   const doc = new jsPDF();
-  const active = projects.filter((p) => p.status === 'active');
-  const archive = projects.filter((p) => p.status === 'completed' || p.status === 'default');
+  const sourceList = filter ? projectsTouchedByFilter(projects, filter) : projects;
+  const active = sourceList.filter((p) => p.status === 'active');
+  const archive = sourceList.filter((p) => p.status === 'completed' || p.status === 'default');
 
   const includeActive = mode === 'all' || mode === 'active';
   const includeArchive = mode === 'all' || mode === 'archive';
-  const periodLabel =
+  const baseLabel =
     mode === 'active' ? 'Project Aktif' : mode === 'archive' ? 'Riwayat Project' : 'Semua Project';
+  const periodLabel = `${baseLabel}${buildPeriodLabel(filter)}`;
 
   pdfHeader(doc, periodLabel);
 
@@ -214,19 +244,34 @@ export function exportProjectsToPdf(projects, accounts, mode = 'all') {
   }
 
   // Summary footer
-  const totalDisbursed = projects.reduce((s, p) => s + (p.disbursedAmount || 0), 0);
-  const totalReceived = projects.reduce(
+  const totalDisbursed = sourceList.reduce((s, p) => s + (p.disbursedAmount || 0), 0);
+  const totalReceived = sourceList.reduce(
     (s, p) => s + projectSummary(p).receivedSoFar,
     0
   );
+  let totalReceivedInRange = totalReceived;
+  if (filter) {
+    totalReceivedInRange = 0;
+    sourceList.forEach((p) => {
+      (p.payments || []).forEach((pay) => {
+        if (pay.receivedDate && inDateRange(pay.receivedDate, filter)) {
+          totalReceivedInRange += pay.receivedAmount || 0;
+        }
+      });
+    });
+  }
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
   doc.text(`Total Modal Keluar: ${formatCurrency(totalDisbursed)}`, 14, cursorY);
-  doc.text(`Total Diterima: ${formatCurrency(totalReceived)}`, 14, cursorY + 6);
+  doc.text(
+    `Total Diterima${filter ? ' (dalam rentang)' : ''}: ${formatCurrency(totalReceivedInRange)}`,
+    14,
+    cursorY + 6
+  );
 
   const now = new Date();
   const monthName = MONTHS[now.getMonth()];
-  const filename = `Pusat Gadai Madiun_Project_${periodLabel.replace(/\s+/g, '_')}_${monthName}_${now.getFullYear()}.pdf`;
+  const filename = `Pusat Gadai Madiun_Project_${baseLabel.replace(/\s+/g, '_')}_${monthName}_${now.getFullYear()}.pdf`;
   doc.save(filename);
 }
 
