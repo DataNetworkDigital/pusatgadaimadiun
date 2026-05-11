@@ -112,10 +112,11 @@ export function buildDemoSeed() {
   ];
 
   const reminders = [
-    { title: 'Bayar Kos',       dayOfMonth: 5,  amount: 3500000, accountKey: 'BCA',   isActive: true },
-    { title: 'Token Listrik',   dayOfMonth: 7,  amount: 150000,  accountKey: 'GoPay', isActive: true },
-    { title: 'Bayar WiFi',      dayOfMonth: 10, amount: 350000,  accountKey: 'BCA',   isActive: true },
-    { title: 'Cicilan ke Budi', dayOfMonth: 20, amount: 250000,  accountKey: 'Kas',   isActive: true },
+    { type: 'income',  title: 'Gaji Bulanan',    dayOfMonth: 1,  amount: 8500000, accountKey: 'BCA',   isActive: true },
+    { type: 'expense', title: 'Bayar Kos',       dayOfMonth: 5,  amount: 3500000, accountKey: 'BCA',   isActive: true },
+    { type: 'expense', title: 'Token Listrik',   dayOfMonth: 7,  amount: 150000,  accountKey: 'GoPay', isActive: true },
+    { type: 'expense', title: 'Bayar WiFi',      dayOfMonth: 10, amount: 350000,  accountKey: 'BCA',   isActive: true },
+    { type: 'expense', title: 'Cicilan ke Budi', dayOfMonth: 20, amount: 250000,  accountKey: 'Kas',   isActive: true },
   ];
 
   // Active project: started 2 months ago, 6 months duration, 4.5%/bulan,

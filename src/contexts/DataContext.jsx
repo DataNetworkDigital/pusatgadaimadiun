@@ -308,6 +308,7 @@ export function DataProvider({ children }) {
   // ===== Reminders =====
   async function addReminder(data) {
     const ref = await addDoc(collection(db, C('reminders')), {
+      type: data.type === 'income' ? 'income' : 'expense',
       title: data.title,
       dayOfMonth: Number(data.dayOfMonth),
       amount: data.amount ? Number(data.amount) : null,
@@ -315,20 +316,20 @@ export function DataProvider({ children }) {
       isActive: data.isActive !== false,
       createdAt: serverTimestamp(),
     });
-    toast('Reminder ditambahkan');
+    toast('Pembayaran berulang ditambahkan');
     return ref;
   }
 
   async function updateReminder(id, data) {
     await updateDoc(doc(db, C('reminders'), id), data);
     if (!('isActive' in data && Object.keys(data).length === 1)) {
-      toast('Reminder tersimpan');
+      toast('Pembayaran berulang tersimpan');
     }
   }
 
   async function deleteReminder(id) {
     await deleteDoc(doc(db, C('reminders'), id));
-    toast('Reminder dihapus');
+    toast('Pembayaran berulang dihapus');
   }
 
   // ===== Projects =====

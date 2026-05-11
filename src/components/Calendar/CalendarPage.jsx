@@ -113,9 +113,11 @@ export default function CalendarPage() {
 
       {reminders.length > 0 && (
         <div>
-          <SectionTitle>Reminder Bulanan</SectionTitle>
+          <SectionTitle>Pembayaran Berulang</SectionTitle>
           <Card className="!px-4 !py-1">
-            {reminders.map((r, i) => (
+            {reminders.map((r, i) => {
+              const isIncome = r.type === 'income';
+              return (
               <div
                 key={r.id}
                 className={`flex items-center gap-3 py-3.5 ${
@@ -128,15 +130,16 @@ export default function CalendarPage() {
                 <div className="flex-1 min-w-0">
                   <div className="text-[15px] font-medium text-ink truncate">{r.title}</div>
                   <div className="text-[12px] text-ink-mute truncate">
-                    Tiap tanggal {r.dayOfMonth}
-                    {r.amount ? ` · ${formatCurrency(r.amount)}` : ''}
+                    {isIncome ? 'Pemasukan' : 'Pengeluaran'} · tiap tanggal {r.dayOfMonth}
+                    {r.amount ? ` · ` : ''}
+                    {r.amount ? <span className={isIncome ? 'text-income font-semibold' : 'text-expense font-semibold'}>{formatCurrency(r.amount)}</span> : null}
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => updateReminder(r.id, { isActive: !r.isActive })}
                   className="flex-shrink-0"
-                  aria-label={r.isActive ? 'Nonaktifkan reminder' : 'Aktifkan reminder'}
+                  aria-label={r.isActive ? 'Nonaktifkan pembayaran berulang' : 'Aktifkan pembayaran berulang'}
                 >
                   <Pill tone={r.isActive ? 'daun' : 'neutral'}>
                     {r.isActive ? 'Aktif' : 'Nonaktif'}
@@ -162,7 +165,8 @@ export default function CalendarPage() {
                   <IcTrash size={16} sw={1.9} />
                 </button>
               </div>
-            ))}
+              );
+            })}
           </Card>
         </div>
       )}
@@ -217,8 +221,8 @@ export default function CalendarPage() {
         onConfirm={async () => {
           if (delRem) await deleteReminder(delRem.id);
         }}
-        title="Hapus Reminder?"
-        message={delRem ? `Reminder "${delRem.title}" akan dihapus.` : ''}
+        title="Hapus Pembayaran Berulang?"
+        message={delRem ? `Pembayaran berulang "${delRem.title}" akan dihapus.` : ''}
       />
       <ConfirmDialog
         open={!!delTx}

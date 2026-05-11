@@ -85,6 +85,7 @@ async function seed() {
   for (const r of reminders) {
     const ref = doc(collection(db, 'demo_reminders'));
     batch.set(ref, {
+      type: r.type === 'income' ? 'income' : 'expense',
       title: r.title,
       dayOfMonth: r.dayOfMonth,
       amount: r.amount,

@@ -129,7 +129,7 @@ export default function CalendarGrid({
           <span className="w-1.5 h-1.5 rounded-full bg-langit" /> Transfer
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-emas" /> Reminder / Tempo
+          <span className="w-1.5 h-1.5 rounded-full bg-emas" /> Berulang / Tempo
         </span>
         <span className="flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo" /> Project

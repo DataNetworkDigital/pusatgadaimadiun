@@ -37,7 +37,7 @@ export default function ResetData({ open, onClose }) {
     >
       <div className="space-y-4">
         <div className="bg-expense-bg border border-expense/30 rounded-lg p-3 text-sm text-expense">
-          ⚠️ Semua rekening, transaksi, utang, piutang, dan reminder akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.
+          ⚠️ Semua rekening, transaksi, utang, piutang, dan pembayaran berulang akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.
         </div>
         <div>
           <label className="label-text">Ketik "{CONFIRM_TEXT}" untuk konfirmasi</label>

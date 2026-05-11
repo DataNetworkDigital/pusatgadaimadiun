@@ -5,7 +5,7 @@ import { useDemo } from '../../contexts/DemoContext';
 import Card from '../common/Card';
 import SectionTitle from '../common/SectionTitle';
 import TxRow from '../common/TxRow';
-import { IcBell, IcAlert, IcBriefcase, IcChevronRight } from '../common/icons';
+import { IcReset, IcAlert, IcBriefcase, IcChevronRight } from '../common/icons';
 
 export default function DayDetail({
   date,
@@ -115,30 +115,33 @@ export default function DayDetail({
           </div>
         ))}
 
-        {dayReminders.map((r, i) => (
+        {dayReminders.map((r, i) => {
+          const isIncome = r.type === 'income';
+          return (
           <div
             key={r.id}
             className={`flex items-center gap-3 py-3.5 ${
               i < dayReminders.length - 1 || dayTx.length > 0 ? 'border-b border-line-soft' : ''
             }`}
           >
-            <div className="w-[42px] h-[42px] rounded-xl bg-emas-soft text-emas flex items-center justify-center flex-shrink-0">
-              <IcBell size={20} sw={2} />
+            <div className={`w-[42px] h-[42px] rounded-xl flex items-center justify-center flex-shrink-0 ${isIncome ? 'bg-income/15 text-income' : 'bg-expense/15 text-expense'}`}>
+              <IcReset size={20} sw={2} />
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-[16px] font-medium text-ink leading-tight">{r.title}</div>
-              <div className="text-[13px] text-ink-mute mt-0.5">Reminder bulanan</div>
+              <div className="text-[13px] text-ink-mute mt-0.5">{isIncome ? 'Pemasukan berulang' : 'Pengeluaran berulang'}</div>
             </div>
             {r.amount && (
               <div
-                className="font-num text-[15px] font-semibold text-emas whitespace-nowrap"
+                className={`font-num text-[15px] font-semibold whitespace-nowrap ${isIncome ? 'text-income' : 'text-expense'}`}
                 style={{ fontVariantNumeric: 'tabular-nums' }}
               >
                 {formatCurrency(r.amount, false)}
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
 
         {dayTx.map((tx, i) => (
           <TxRow

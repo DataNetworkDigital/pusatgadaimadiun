@@ -1,5 +1,5 @@
 import Modal from '../common/Modal';
-import { IcSwap, IcLedger, IcBell, IcChevronRight } from '../common/icons';
+import { IcSwap, IcLedger, IcReset, IcChevronRight } from '../common/icons';
 
 export default function AddActionSheet({ open, onClose, onPick }) {
   const items = [
@@ -21,9 +21,9 @@ export default function AddActionSheet({ open, onClose, onPick }) {
     },
     {
       id: 'reminder',
-      label: 'Reminder Bulanan',
-      hint: 'Pengingat berulang setiap bulan',
-      Icon: IcBell,
+      label: 'Pembayaran Berulang',
+      hint: 'Catat pengeluaran tetap setiap bulan',
+      Icon: IcReset,
       iconBg: 'bg-emas-soft',
       iconColor: '#C9952F',
     },
