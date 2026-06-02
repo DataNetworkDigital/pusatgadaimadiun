@@ -7,7 +7,11 @@ import { formatCurrency } from '../../utils/formatCurrency';
 
 const DEFAULT_RETURN_PCT = 5;
 
-export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
+export default function ProjectForm({ open, onClose, onSubmit, accounts, initial }) {
+  const isEdit = !!initial;
+  const hasReceived = isEdit && (initial.payments || []).some((p) => p.receivedAmount != null);
+  const capitalLocked = hasReceived;
+
   const [name, setName] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [contractNumber, setContractNumber] = useState('');
@@ -25,23 +29,39 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
 
   useEffect(() => {
     if (open) {
-      setName('');
-      setOwnerName('');
-      setContractNumber('');
-      setDescription('');
-      setPrincipalAmount(0);
-      setDisbursedAmount(0);
-      setMonthlyReturnPct('');
-      setDurationMonths(6);
-      const today = new Date();
-      setStartDate(formatDateInput(today));
-      setPaymentDayOfMonth(today.getDate());
-      setSourceAccountId(accounts?.[0]?.id || '');
-      setProofUrl('');
+      if (isEdit) {
+        const start = initial.startDate?.toDate ? initial.startDate.toDate() : (initial.startDate || new Date());
+        setName(initial.name || '');
+        setOwnerName(initial.ownerName || '');
+        setContractNumber(initial.contractNumber || '');
+        setDescription(initial.description || '');
+        setPrincipalAmount(initial.principalAmount || 0);
+        setDisbursedAmount(initial.disbursedAmount || 0);
+        setMonthlyReturnPct(initial.monthlyReturnPct != null ? String(initial.monthlyReturnPct) : '');
+        setDurationMonths(initial.durationMonths || 6);
+        setStartDate(formatDateInput(start));
+        setPaymentDayOfMonth(initial.paymentDayOfMonth || start.getDate());
+        setSourceAccountId(initial.sourceAccountId || accounts?.[0]?.id || '');
+        setProofUrl(initial.proofUrl || '');
+      } else {
+        setName('');
+        setOwnerName('');
+        setContractNumber('');
+        setDescription('');
+        setPrincipalAmount(0);
+        setDisbursedAmount(0);
+        setMonthlyReturnPct('');
+        setDurationMonths(6);
+        const today = new Date();
+        setStartDate(formatDateInput(today));
+        setPaymentDayOfMonth(today.getDate());
+        setSourceAccountId(accounts?.[0]?.id || '');
+        setProofUrl('');
+      }
       setError('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, initial]);
 
   // Auto-sync disbursed = principal when user hasn't customized it yet
   useEffect(() => {
@@ -115,8 +135,8 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
     <Modal
       open={open}
       onClose={onClose}
-      title="Tambah Project"
-      subtitle="Catat investasi project bisnis dengan jadwal pembayaran terstruktur"
+      title={isEdit ? 'Edit Project' : 'Tambah Project'}
+      subtitle={isEdit ? 'Update detail project (jadwal pembayaran disesuaikan otomatis)' : 'Catat investasi project bisnis dengan jadwal pembayaran terstruktur'}
       footer={
         <button
           type="submit"
@@ -124,11 +144,16 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
           className="btn-primary w-full"
           disabled={submitting}
         >
-          {submitting ? 'Menyimpan…' : 'Simpan Project'}
+          {submitting ? 'Menyimpan…' : (isEdit ? 'Simpan Perubahan' : 'Simpan Project')}
         </button>
       }
     >
       <form id="project-form" onSubmit={handleSubmit} className="space-y-4">
+        {capitalLocked && (
+          <div className="bg-emas-soft border border-emas/30 rounded-xl p-3 text-[12px] text-ink-soft leading-snug">
+            ⚠️ Sudah ada pembayaran masuk — modal, rekening sumber, dan tanggal mulai tidak bisa diubah. Durasi, return %, dan tanggal pembayaran masih bisa disesuaikan (jadwal pembayaran yang belum diterima akan dihitung ulang).
+          </div>
+        )}
         <div>
           <label className="label-text">Nama Project</label>
           <input
@@ -165,12 +190,12 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
 
         <div>
           <label className="label-text">Nilai Project (basis return)</label>
-          <CurrencyInput value={principalAmount} onChange={setPrincipalAmount} />
+          <CurrencyInput value={principalAmount} onChange={setPrincipalAmount} disabled={capitalLocked} />
         </div>
 
         <div>
           <label className="label-text">Modal Keluar dari Rekening</label>
-          <CurrencyInput value={disbursedAmount} onChange={setDisbursedAmount} />
+          <CurrencyInput value={disbursedAmount} onChange={setDisbursedAmount} disabled={capitalLocked} />
           {upfrontDiscount > 0 && (
             <p className="text-[12px] text-daun mt-1">
               Potongan di muka: {formatCurrency(upfrontDiscount)}
@@ -239,6 +264,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
               className="input-field"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
+              disabled={capitalLocked}
             />
           </div>
           <div>
@@ -261,6 +287,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts }) {
             value={sourceAccountId}
             onChange={(e) => setSourceAccountId(e.target.value)}
             required
+            disabled={capitalLocked}
           >
             <option value="">Pilih rekening</option>
             {accounts?.map((a) => (

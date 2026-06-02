@@ -6,10 +6,63 @@ export function calcMonthlyInterest(principalAmount, monthlyReturnPct) {
   return Math.round((Number(principalAmount) * Number(monthlyReturnPct)) / 100);
 }
 
-function pickPaymentDate(year, month, dayOfMonth) {
+export function pickPaymentDate(year, month, dayOfMonth) {
   const last = new Date(year, month + 1, 0).getDate();
   const day = Math.min(dayOfMonth, last);
   return new Date(year, month, day);
+}
+
+/**
+ * Recompute schedule preserving already-received payments.
+ * Used when editing an active project's durationMonths / monthlyReturnPct /
+ * paymentDayOfMonth / principalAmount. Paid payments keep their existing
+ * receivedAmount/receivedDate/transactionId/accountId. Their `no`, `dueDate`,
+ * and `type` (interest vs final) are aligned to the new schedule. Unpaid
+ * payments are regenerated fresh.
+ */
+export function recomputeUnpaidSchedule(existingPayments, {
+  principalAmount,
+  monthlyReturnPct,
+  durationMonths,
+  startDate,
+  paymentDayOfMonth,
+}) {
+  const principal = Number(principalAmount) || 0;
+  const interest = calcMonthlyInterest(principal, monthlyReturnPct);
+  const start = startDate instanceof Date ? startDate : startDate.toDate();
+  const day = Number(paymentDayOfMonth) || start.getDate();
+  const months = Number(durationMonths) || 1;
+  const paidByNo = new Map();
+  for (const p of existingPayments || []) {
+    if (p.receivedAmount != null) paidByNo.set(p.no, p);
+  }
+
+  const payments = [];
+  for (let i = 1; i <= months; i++) {
+    const isLast = i === months;
+    const due = pickPaymentDate(start.getFullYear(), start.getMonth() + i, day);
+    const existingPaid = paidByNo.get(i);
+    if (existingPaid) {
+      payments.push({
+        ...existingPaid,
+        no: i,
+        // Keep original received fields; align type to new position
+        type: isLast ? 'final' : 'interest',
+      });
+    } else {
+      payments.push({
+        no: i,
+        dueDate: Timestamp.fromDate(due),
+        type: isLast ? 'final' : 'interest',
+        expectedAmount: isLast ? interest + principal : interest,
+        receivedAmount: null,
+        receivedDate: null,
+        transactionId: null,
+        accountId: null,
+      });
+    }
+  }
+  return payments;
 }
 
 export function generateProjectSchedule({

@@ -8,6 +8,7 @@ import Pill from '../common/Pill';
 import ConfirmDialog from '../common/ConfirmDialog';
 import PaymentConfirmSheet from './PaymentConfirmSheet';
 import CloseProjectSheet from './CloseProjectSheet';
+import ProjectForm from './ProjectForm';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { projectSummary } from '../../utils/projectSchedule';
@@ -19,6 +20,7 @@ import {
   IcArrowUp,
   IcInfo,
   IcTrash,
+  IcEdit,
 } from '../common/icons';
 
 function StatRow({ label, value, valueClass = 'text-ink', isLast }) {
@@ -105,11 +107,12 @@ export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDemo } = useDemo();
-  const { projects, accounts, recordProjectPayment, closeProjectAsDefault, deleteProject } =
+  const { projects, accounts, recordProjectPayment, closeProjectAsDefault, deleteProject, updateProject } =
     useData();
   const [paying, setPaying] = useState(null);
   const [closing, setClosing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const base = isDemo ? '/demo' : '';
   const project = projects.find((p) => p.id === id);
@@ -298,6 +301,14 @@ export default function ProjectDetail() {
         <div className="flex gap-2 mb-3.5">
           <button
             type="button"
+            onClick={() => setEditing(true)}
+            className="flex-1 py-3 rounded-xl bg-indigo-soft text-indigo font-semibold text-[14px] active:opacity-80 flex items-center justify-center gap-1.5"
+          >
+            <IcEdit size={16} sw={2} />
+            Edit Project
+          </button>
+          <button
+            type="button"
             onClick={() => setClosing(true)}
             className="flex-1 py-3 rounded-xl bg-terra-soft text-terra font-semibold text-[14px] active:opacity-80"
           >
@@ -314,6 +325,14 @@ export default function ProjectDetail() {
         </div>
       )}
 
+      <ProjectForm
+        key={`edit-${project.id}`}
+        open={editing}
+        onClose={() => setEditing(false)}
+        onSubmit={(data) => updateProject(project.id, data)}
+        accounts={accounts}
+        initial={project}
+      />
       <PaymentConfirmSheet
         open={!!paying}
         onClose={() => setPaying(null)}

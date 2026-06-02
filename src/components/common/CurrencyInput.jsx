@@ -1,6 +1,6 @@
 import { formatCurrencyInput, parseCurrency } from '../../utils/formatCurrency';
 
-export default function CurrencyInput({ value, onChange, placeholder = '0', autoFocus, id }) {
+export default function CurrencyInput({ value, onChange, placeholder = '0', autoFocus, id, disabled }) {
   const display = formatCurrencyInput(value);
   return (
     <div className="relative">
@@ -10,7 +10,8 @@ export default function CurrencyInput({ value, onChange, placeholder = '0', auto
         type="text"
         inputMode="numeric"
         autoFocus={autoFocus}
-        className="input-field pl-12 text-right font-semibold text-lg"
+        disabled={disabled}
+        className={`input-field pl-12 text-right font-semibold text-lg ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
         value={display}
         placeholder={placeholder}
         onChange={(e) => onChange(parseCurrency(e.target.value))}

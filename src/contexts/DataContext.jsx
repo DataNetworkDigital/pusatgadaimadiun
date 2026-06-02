@@ -7,7 +7,7 @@ import { db } from '../firebase';
 import { useAuth } from './AuthContext';
 import { useDemo } from './DemoContext';
 import { useToast } from './ToastContext';
-import { generateProjectSchedule } from '../utils/projectSchedule';
+import { generateProjectSchedule, recomputeUnpaidSchedule } from '../utils/projectSchedule';
 
 const DataContext = createContext(null);
 
@@ -399,13 +399,112 @@ export function DataProvider({ children }) {
   }
 
   async function updateProject(id, data) {
+    const project = projects.find((p) => p.id === id);
+    if (!project) throw new Error('Project tidak ditemukan');
+    const hasReceived = (project.payments || []).some((p) => p.receivedAmount != null);
+
     const update = {};
+    // Text/metadata fields — always editable
     if (data.name !== undefined) update.name = data.name;
     if (data.ownerName !== undefined) update.ownerName = data.ownerName;
     if (data.contractNumber !== undefined) update.contractNumber = data.contractNumber;
     if (data.description !== undefined) update.description = data.description;
     if (data.proofUrl !== undefined) update.proofUrl = data.proofUrl;
     if (data.proofFileName !== undefined) update.proofFileName = data.proofFileName;
+
+    // Capital/funding-flow fields — only safe if no payments received
+    const sameDay = (a, b) => {
+      if (!a || !b) return a === b;
+      return a.getFullYear() === b.getFullYear() &&
+             a.getMonth() === b.getMonth() &&
+             a.getDate() === b.getDate();
+    };
+    const capitalChange =
+      (data.principalAmount !== undefined && Number(data.principalAmount) !== project.principalAmount) ||
+      (data.disbursedAmount !== undefined && Number(data.disbursedAmount) !== project.disbursedAmount) ||
+      (data.sourceAccountId !== undefined && data.sourceAccountId !== project.sourceAccountId) ||
+      (data.startDate !== undefined && (() => {
+        const newD = data.startDate instanceof Date ? data.startDate : data.startDate?.toDate?.();
+        const oldD = project.startDate?.toDate?.();
+        return !sameDay(newD, oldD);
+      })());
+    if (capitalChange && hasReceived) {
+      throw new Error('Modal/rekening/tanggal mulai tidak bisa diubah karena sudah ada pembayaran masuk.');
+    }
+
+    // Schedule-affecting fields
+    const scheduleChange =
+      data.monthlyReturnPct !== undefined ||
+      data.durationMonths !== undefined ||
+      data.paymentDayOfMonth !== undefined ||
+      data.principalAmount !== undefined ||
+      data.startDate !== undefined;
+
+    if (scheduleChange) {
+      const newPrincipal = data.principalAmount !== undefined ? Number(data.principalAmount) : project.principalAmount;
+      const newPct = data.monthlyReturnPct !== undefined ? Number(data.monthlyReturnPct) : project.monthlyReturnPct;
+      const newDuration = data.durationMonths !== undefined ? Number(data.durationMonths) : project.durationMonths;
+      const newDay = data.paymentDayOfMonth !== undefined ? Number(data.paymentDayOfMonth) : project.paymentDayOfMonth;
+      const newStart = data.startDate !== undefined
+        ? (data.startDate instanceof Date ? data.startDate : data.startDate.toDate())
+        : (project.startDate?.toDate?.() || new Date());
+      if (newDuration <= 0) throw new Error('Durasi project minimal 1 bulan');
+      if (newPrincipal <= 0) throw new Error('Nilai project harus lebih dari 0');
+      if (newDay < 1 || newDay > 31) throw new Error('Tanggal pembayaran harus 1-31');
+
+      update.payments = recomputeUnpaidSchedule(project.payments || [], {
+        principalAmount: newPrincipal,
+        monthlyReturnPct: newPct,
+        durationMonths: newDuration,
+        startDate: newStart,
+        paymentDayOfMonth: newDay,
+      });
+      if (data.principalAmount !== undefined) update.principalAmount = newPrincipal;
+      if (data.monthlyReturnPct !== undefined) update.monthlyReturnPct = newPct;
+      if (data.durationMonths !== undefined) update.durationMonths = newDuration;
+      if (data.paymentDayOfMonth !== undefined) update.paymentDayOfMonth = newDay;
+      if (data.startDate !== undefined) update.startDate = Timestamp.fromDate(newStart);
+    }
+
+    // disbursedAmount and sourceAccountId require batch with account balance adjustment
+    const needBatch =
+      (data.disbursedAmount !== undefined && Number(data.disbursedAmount) !== project.disbursedAmount) ||
+      (data.sourceAccountId !== undefined && data.sourceAccountId !== project.sourceAccountId);
+
+    if (needBatch) {
+      const newDisbursed = data.disbursedAmount !== undefined ? Number(data.disbursedAmount) : project.disbursedAmount;
+      const newSourceId = data.sourceAccountId !== undefined ? data.sourceAccountId : project.sourceAccountId;
+      if (newDisbursed <= 0) throw new Error('Modal keluar harus lebih dari 0');
+      if (!newSourceId) throw new Error('Pilih rekening sumber');
+
+      const batch = writeBatch(db);
+      // Reverse old funding effect on old account
+      if (project.fundingTransactionId) {
+        batch.update(doc(db, C('accounts'), project.sourceAccountId), {
+          balance: increment(project.disbursedAmount || 0),
+          updatedAt: serverTimestamp(),
+        });
+        // Apply new funding effect on new account (could be same)
+        batch.update(doc(db, C('accounts'), newSourceId), {
+          balance: increment(-newDisbursed),
+          updatedAt: serverTimestamp(),
+        });
+        // Update funding transaction
+        batch.update(doc(db, C('transactions'), project.fundingTransactionId), {
+          amount: newDisbursed,
+          fromAccount: newSourceId,
+        });
+      }
+      update.disbursedAmount = newDisbursed;
+      update.sourceAccountId = newSourceId;
+      if (Object.keys(update).length > 0) {
+        batch.update(doc(db, C('projects'), id), update);
+      }
+      await batch.commit();
+      toast('Project tersimpan');
+      return;
+    }
+
     if (Object.keys(update).length === 0) return;
     await updateDoc(doc(db, C('projects'), id), update);
     toast('Project tersimpan');
