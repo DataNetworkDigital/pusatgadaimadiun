@@ -352,11 +352,19 @@ export default function ProjectDetail() {
         open={deleting}
         onClose={() => setDeleting(false)}
         onConfirm={handleDelete}
-        title="Hapus Project?"
+        title="Batalkan Project?"
         message={
-          'Project akan dihapus dan dana modal dikembalikan ke rekening sumber. Hanya bisa dihapus sebelum ada pembayaran masuk.'
+          totalReturnReceived > 0
+            ? `Modal ${formatCurrency(project.disbursedAmount)} dikembalikan ke ${accountName(
+                project.sourceAccountId
+              )}, dan return ${formatCurrency(
+                totalReturnReceived
+              )} yang sudah diterima ditarik kembali dari rekening. Project & semua transaksi terkait dihapus permanen.`
+            : `Modal ${formatCurrency(project.disbursedAmount)} dikembalikan ke ${accountName(
+                project.sourceAccountId
+              )}. Project & semua transaksi terkait dihapus permanen.`
         }
-        confirmLabel="Hapus"
+        confirmLabel="Ya, Batalkan"
       />
     </div>
   );

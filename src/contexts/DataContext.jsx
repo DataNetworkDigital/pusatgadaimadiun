@@ -613,24 +613,58 @@ export function DataProvider({ children }) {
     toast(lossAmount > 0 ? 'Project ditutup, kerugian dicatat' : 'Project ditutup (BEP)');
   }
 
+  // Full cancel/undo: reverse ALL cash effects as if the project never existed.
+  // - Return the disbursed funding to the source account
+  // - Claw back every received return from the account it landed in
+  // - Reverse any recovery recorded when closing as macet
+  // - Delete the project and all its related transactions
   async function deleteProject(id) {
     const project = projects.find((p) => p.id === id);
     if (!project) return;
-    const hasReceived = (project.payments || []).some((p) => p.receivedAmount != null);
-    if (hasReceived) {
-      throw new Error('Project sudah ada pembayaran masuk. Tutup project alih-alih menghapus.');
-    }
     const batch = writeBatch(db);
+
+    // 1. Return funding money to the source account, delete the funding transaction
     if (project.fundingTransactionId) {
       batch.delete(doc(db, C('transactions'), project.fundingTransactionId));
+    }
+    if (project.sourceAccountId && project.disbursedAmount) {
       batch.update(doc(db, C('accounts'), project.sourceAccountId), {
         balance: increment(project.disbursedAmount || 0),
         updatedAt: serverTimestamp(),
       });
     }
+
+    // 2. Claw back every received return from the account it was deposited to
+    for (const p of project.payments || []) {
+      if (p.receivedAmount != null) {
+        if (p.transactionId) {
+          batch.delete(doc(db, C('transactions'), p.transactionId));
+        }
+        if (p.accountId && p.receivedAmount) {
+          batch.update(doc(db, C('accounts'), p.accountId), {
+            balance: increment(-(p.receivedAmount || 0)),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+    }
+
+    // 3. Reverse any recovery booked when the project was closed as macet
+    if (project.finalRecoveryTransactionId) {
+      batch.delete(doc(db, C('transactions'), project.finalRecoveryTransactionId));
+      const recoveryTx = transactions.find((t) => t.id === project.finalRecoveryTransactionId);
+      if (recoveryTx?.toAccount && project.finalRecovery) {
+        batch.update(doc(db, C('accounts'), recoveryTx.toAccount), {
+          balance: increment(-(project.finalRecovery || 0)),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+
     batch.delete(doc(db, C('projects'), id));
     await batch.commit();
-    toast('Project dihapus');
+    const clawedBack = (project.payments || []).reduce((s, p) => s + (p.receivedAmount || 0), 0);
+    toast(clawedBack > 0 ? 'Project dibatalkan, modal & return dikembalikan' : 'Project dibatalkan, modal dikembalikan');
   }
 
   // ===== Reset =====
