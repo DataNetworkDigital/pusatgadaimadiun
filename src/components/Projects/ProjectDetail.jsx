@@ -41,7 +41,7 @@ function StatRow({ label, value, valueClass = 'text-ink', isLast }) {
   );
 }
 
-function PaymentRow({ payment, onConfirm, isLast }) {
+function PaymentRow({ payment, onConfirm, onEdit, editable, isLast }) {
   const due = toDate(payment.dueDate);
   const recv = toDate(payment.receivedDate);
   const isPaid = payment.receivedAmount != null;
@@ -98,6 +98,15 @@ function PaymentRow({ payment, onConfirm, isLast }) {
             Konfirmasi →
           </button>
         )}
+        {isPaid && editable && (
+          <button
+            type="button"
+            onClick={() => onEdit(payment)}
+            className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70"
+          >
+            Edit →
+          </button>
+        )}
       </div>
     </div>
   );
@@ -107,7 +116,7 @@ export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDemo } = useDemo();
-  const { projects, accounts, recordProjectPayment, closeProjectAsDefault, deleteProject, updateProject } =
+  const { projects, accounts, recordProjectPayment, updateProjectPayment, closeProjectAsDefault, deleteProject, updateProject } =
     useData();
   const [paying, setPaying] = useState(null);
   const [closing, setClosing] = useState(false);
@@ -142,7 +151,11 @@ export default function ProjectDetail() {
 
   async function handleConfirmPayment(data) {
     if (!paying) return;
-    await recordProjectPayment(project.id, paying.no, data);
+    if (paying.receivedAmount != null) {
+      await updateProjectPayment(project.id, paying.no, data);
+    } else {
+      await recordProjectPayment(project.id, paying.no, data);
+    }
   }
 
   async function handleClose(data) {
@@ -292,6 +305,8 @@ export default function ProjectDetail() {
             key={p.no}
             payment={p}
             onConfirm={(pay) => isActive && setPaying(pay)}
+            onEdit={(pay) => (isActive || isCompleted) && setPaying(pay)}
+            editable={isActive || isCompleted}
             isLast={i === project.payments.length - 1}
           />
         ))}

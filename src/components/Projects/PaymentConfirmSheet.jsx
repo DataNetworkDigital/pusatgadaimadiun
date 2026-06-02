@@ -5,6 +5,7 @@ import { formatDateInput, fromDateInput, formatDate, toDate } from '../../utils/
 import { formatCurrency } from '../../utils/formatCurrency';
 
 export default function PaymentConfirmSheet({ open, onClose, project, payment, accounts, onConfirm }) {
+  const isEdit = payment?.receivedAmount != null;
   const [accountId, setAccountId] = useState('');
   const [amount, setAmount] = useState(0);
   const [date, setDate] = useState(formatDateInput(new Date()));
@@ -13,9 +14,15 @@ export default function PaymentConfirmSheet({ open, onClose, project, payment, a
 
   useEffect(() => {
     if (open && payment) {
-      setAccountId(project?.sourceAccountId || accounts?.[0]?.id || '');
-      setAmount(payment.expectedAmount || 0);
-      setDate(formatDateInput(new Date()));
+      if (payment.receivedAmount != null) {
+        setAccountId(payment.accountId || project?.sourceAccountId || accounts?.[0]?.id || '');
+        setAmount(payment.receivedAmount || 0);
+        setDate(formatDateInput(payment.receivedDate || new Date()));
+      } else {
+        setAccountId(project?.sourceAccountId || accounts?.[0]?.id || '');
+        setAmount(payment.expectedAmount || 0);
+        setDate(formatDateInput(new Date()));
+      }
       setError('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -52,7 +59,7 @@ export default function PaymentConfirmSheet({ open, onClose, project, payment, a
     <Modal
       open={open}
       onClose={onClose}
-      title={isFinal ? 'Konfirmasi Pelunasan' : 'Konfirmasi Pembayaran'}
+      title={isEdit ? 'Edit Pembayaran' : (isFinal ? 'Konfirmasi Pelunasan' : 'Konfirmasi Pembayaran')}
       subtitle={`Pembayaran ke-${payment.no} dari ${project.name}`}
       footer={
         <button
@@ -61,7 +68,7 @@ export default function PaymentConfirmSheet({ open, onClose, project, payment, a
           className="btn-primary w-full"
           disabled={submitting}
         >
-          {submitting ? 'Mencatat…' : 'Konfirmasi Diterima'}
+          {submitting ? 'Menyimpan…' : (isEdit ? 'Simpan Perubahan' : 'Konfirmasi Diterima')}
         </button>
       }
     >

@@ -568,6 +568,71 @@ export function DataProvider({ children }) {
     toast(payment.type === 'final' ? 'Pelunasan project tercatat' : 'Pembayaran tercatat');
   }
 
+  // Edit an already-received payment. Re-syncs the recorded income transaction
+  // and the account balance: old effect is reversed, new effect applied.
+  // Amount, target account, and date can all change.
+  async function updateProjectPayment(projectId, paymentNo, { accountId, amount, date }) {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Project tidak ditemukan');
+    const payment = (project.payments || []).find((p) => p.no === paymentNo);
+    if (!payment) throw new Error('Pembayaran tidak ditemukan');
+    if (payment.receivedAmount == null) throw new Error('Pembayaran ini belum diterima');
+    const newAmt = Number(amount);
+    if (newAmt <= 0) throw new Error('Jumlah harus lebih dari 0');
+    if (!accountId) throw new Error('Pilih rekening tujuan');
+
+    const oldAmt = Number(payment.receivedAmount) || 0;
+    const oldAccountId = payment.accountId;
+    const recvDate = date instanceof Date
+      ? date
+      : (payment.receivedDate?.toDate?.() || new Date());
+
+    const batch = writeBatch(db);
+
+    // Adjust balances. If the account is unchanged, apply a single net delta
+    // (two increments on the same doc in one batch would not stack reliably).
+    if (oldAccountId && oldAccountId === accountId) {
+      const delta = newAmt - oldAmt;
+      if (delta !== 0) {
+        batch.update(doc(db, C('accounts'), accountId), {
+          balance: increment(delta),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } else {
+      if (oldAccountId) {
+        batch.update(doc(db, C('accounts'), oldAccountId), {
+          balance: increment(-oldAmt),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      batch.update(doc(db, C('accounts'), accountId), {
+        balance: increment(newAmt),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    // Re-sync the recorded income transaction
+    if (payment.transactionId) {
+      batch.update(doc(db, C('transactions'), payment.transactionId), {
+        amount: newAmt,
+        toAccount: accountId,
+        date: Timestamp.fromDate(recvDate),
+      });
+    }
+
+    // Update the payment record
+    const updatedPayments = (project.payments || []).map((p) =>
+      p.no === paymentNo
+        ? { ...p, receivedAmount: newAmt, receivedDate: Timestamp.fromDate(recvDate), accountId }
+        : p
+    );
+    batch.update(doc(db, C('projects'), projectId), { payments: updatedPayments });
+
+    await batch.commit();
+    toast('Pembayaran diperbarui');
+  }
+
   async function closeProjectAsDefault(projectId, { recoveredAmount = 0, accountId, date } = {}) {
     const project = projects.find((p) => p.id === projectId);
     if (!project) throw new Error('Project tidak ditemukan');
@@ -690,7 +755,7 @@ export function DataProvider({ children }) {
     addTransaction, updateTransaction, deleteTransaction,
     addDebt, updateDebt, deleteDebt, payInstallment,
     addReminder, updateReminder, deleteReminder,
-    addProject, updateProject, recordProjectPayment, closeProjectAsDefault, deleteProject,
+    addProject, updateProject, recordProjectPayment, updateProjectPayment, closeProjectAsDefault, deleteProject,
     resetAllData,
   };
 
