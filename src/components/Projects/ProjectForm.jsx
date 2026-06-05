@@ -263,7 +263,14 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
               type="date"
               className="input-field"
               value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setStartDate(v);
+                // Payment day auto-follows the start date's day-of-month
+                // (still manually editable afterward).
+                const day = parseInt(v.slice(8, 10), 10);
+                if (day >= 1 && day <= 31) setPaymentDayOfMonth(day);
+              }}
               disabled={capitalLocked}
             />
           </div>
