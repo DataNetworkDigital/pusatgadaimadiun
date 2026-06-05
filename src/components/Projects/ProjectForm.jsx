@@ -8,6 +8,15 @@ import { formatCurrency } from '../../utils/formatCurrency';
 
 const DEFAULT_RETURN_PCT = 5;
 
+// Disbursed auto-fills as the project value minus the monthly return %
+// taken upfront, e.g. 100jt at 5% → (100% − 5%) × 100jt = 95jt.
+function computeAutoDisbursed(principal, pct) {
+  const p = Number(principal) || 0;
+  const r = Number(pct) || 0;
+  const v = Math.round(p * (1 - r / 100));
+  return v > 0 ? v : 0;
+}
+
 export default function ProjectForm({ open, onClose, onSubmit, accounts, initial }) {
   const isEdit = !!initial;
   const hasReceived = isEdit && (initial.payments || []).some((p) => p.receivedAmount != null);
@@ -27,6 +36,9 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
   const [proofUrl, setProofUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  // Tracks whether the user has manually overridden the auto-computed
+  // disbursed amount. Once touched, principal/return changes stop overwriting it.
+  const [disbursedTouched, setDisbursedTouched] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -44,6 +56,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
         setPaymentDayOfMonth(initial.paymentDayOfMonth || start.getDate());
         setSourceAccountId(initial.sourceAccountId || accounts?.[0]?.id || '');
         setProofUrl(initial.proofUrl || '');
+        setDisbursedTouched(true); // keep the saved disbursed value as-is
       } else {
         setName('');
         setOwnerName('');
@@ -58,19 +71,12 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
         setPaymentDayOfMonth(today.getDate());
         setSourceAccountId(accounts?.[0]?.id || '');
         setProofUrl('');
+        setDisbursedTouched(false); // allow auto-fill for a fresh project
       }
       setError('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial]);
-
-  // Auto-sync disbursed = principal when user hasn't customized it yet
-  useEffect(() => {
-    if (!disbursedAmount || disbursedAmount === 0) {
-      setDisbursedAmount(principalAmount);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [principalAmount]);
 
   const effectiveReturnPct = monthlyReturnPct === '' || monthlyReturnPct == null
     ? DEFAULT_RETURN_PCT
@@ -191,12 +197,31 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
 
         <div>
           <label className="label-text">Nilai Project (basis return)</label>
-          <CurrencyInput value={principalAmount} onChange={setPrincipalAmount} disabled={capitalLocked} />
+          <CurrencyInput
+            value={principalAmount}
+            onChange={(v) => {
+              setPrincipalAmount(v);
+              if (!disbursedTouched) setDisbursedAmount(computeAutoDisbursed(v, effectiveReturnPct));
+            }}
+            disabled={capitalLocked}
+          />
         </div>
 
         <div>
           <label className="label-text">Modal Keluar dari Rekening</label>
-          <CurrencyInput value={disbursedAmount} onChange={setDisbursedAmount} disabled={capitalLocked} />
+          <CurrencyInput
+            value={disbursedAmount}
+            onChange={(v) => {
+              setDisbursedAmount(v);
+              setDisbursedTouched(true);
+            }}
+            disabled={capitalLocked}
+          />
+          {!capitalLocked && (
+            <p className="text-[11px] text-ink-mute mt-1">
+              Terisi otomatis: Nilai project − return {effectiveReturnPct}%. Bisa diubah manual.
+            </p>
+          )}
           {upfrontDiscount > 0 && (
             <p className="text-[12px] text-daun mt-1">
               Potongan di muka: {formatCurrency(upfrontDiscount)}
@@ -219,7 +244,14 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
               min="0"
               className="input-field"
               value={monthlyReturnPct}
-              onChange={(e) => setMonthlyReturnPct(e.target.value)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setMonthlyReturnPct(raw);
+                if (!disbursedTouched) {
+                  const pct = raw === '' ? DEFAULT_RETURN_PCT : Number(raw);
+                  setDisbursedAmount(computeAutoDisbursed(principalAmount, pct));
+                }
+              }}
               placeholder={`${DEFAULT_RETURN_PCT}`}
             />
           </div>
