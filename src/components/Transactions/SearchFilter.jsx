@@ -1,4 +1,5 @@
 import Modal from '../common/Modal';
+import DateField from '../common/DateField';
 
 export default function FilterSheet({ open, onClose, filters, setFilters, accounts, onClear }) {
   function update(patch) {
@@ -94,23 +95,13 @@ export default function FilterSheet({ open, onClose, filters, setFilters, accoun
             <label className="block text-[12px] font-semibold text-ink-mute uppercase tracking-[0.3px] mb-2">
               Dari
             </label>
-            <input
-              type="date"
-              className="w-full bg-paper border border-line rounded-xl px-3 py-3 text-[14px] text-ink focus:outline-none focus:border-indigo focus:ring-2 focus:ring-indigo-soft"
-              value={filters.dateFrom}
-              onChange={(e) => update({ dateFrom: e.target.value })}
-            />
+            <DateField value={filters.dateFrom} onChange={(v) => update({ dateFrom: v })} />
           </div>
           <div>
             <label className="block text-[12px] font-semibold text-ink-mute uppercase tracking-[0.3px] mb-2">
               Sampai
             </label>
-            <input
-              type="date"
-              className="w-full bg-paper border border-line rounded-xl px-3 py-3 text-[14px] text-ink focus:outline-none focus:border-indigo focus:ring-2 focus:ring-indigo-soft"
-              value={filters.dateTo}
-              onChange={(e) => update({ dateTo: e.target.value })}
-            />
+            <DateField value={filters.dateTo} onChange={(v) => update({ dateTo: v })} />
           </div>
         </div>
       </div>

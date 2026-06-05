@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Modal from '../common/Modal';
 import CurrencyInput from '../common/CurrencyInput';
+import DateField from '../common/DateField';
 import { formatDateInput, fromDateInput } from '../../utils/formatDate';
 import { calcMonthlyInterest } from '../../utils/projectSchedule';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -259,19 +260,16 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label-text">Tanggal Mulai</label>
-            <input
-              type="date"
-              className="input-field"
+            <DateField
               value={startDate}
-              onChange={(e) => {
-                const v = e.target.value;
+              disabled={capitalLocked}
+              onChange={(v) => {
                 setStartDate(v);
                 // Payment day auto-follows the start date's day-of-month
                 // (still manually editable afterward).
                 const day = parseInt(v.slice(8, 10), 10);
                 if (day >= 1 && day <= 31) setPaymentDayOfMonth(day);
               }}
-              disabled={capitalLocked}
             />
           </div>
           <div>

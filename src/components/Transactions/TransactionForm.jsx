@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Modal from '../common/Modal';
 import CurrencyInput from '../common/CurrencyInput';
+import DateField from '../common/DateField';
 import { formatDateInput, fromDateInput } from '../../utils/formatDate';
 import { useData } from '../../contexts/DataContext';
 
@@ -125,7 +126,7 @@ export default function TransactionForm({ open, onClose, initial, defaultType })
 
         <div>
           <label className="label-text">Tanggal</label>
-          <input type="date" className="input-field" value={date} onChange={(e) => setDate(e.target.value)} />
+          <DateField value={date} onChange={setDate} />
         </div>
 
         {accounts.length === 0 && (

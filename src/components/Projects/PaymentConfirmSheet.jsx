@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Modal from '../common/Modal';
 import CurrencyInput from '../common/CurrencyInput';
+import DateField from '../common/DateField';
 import { formatDateInput, fromDateInput, formatDate, toDate } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
 
@@ -113,12 +114,7 @@ export default function PaymentConfirmSheet({ open, onClose, project, payment, a
 
         <div>
           <label className="label-text">Tanggal Diterima</label>
-          <input
-            type="date"
-            className="input-field"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
+          <DateField value={date} onChange={setDate} />
         </div>
 
         {error && <p className="text-[13px] text-terra">{error}</p>}

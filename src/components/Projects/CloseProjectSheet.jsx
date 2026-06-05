@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Modal from '../common/Modal';
 import CurrencyInput from '../common/CurrencyInput';
+import DateField from '../common/DateField';
 import { formatDateInput, fromDateInput } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { projectSummary } from '../../utils/projectSchedule';
@@ -117,12 +118,7 @@ export default function CloseProjectSheet({ open, onClose, project, accounts, on
 
         <div>
           <label className="label-text">Tanggal Penutupan</label>
-          <input
-            type="date"
-            className="input-field"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
+          <DateField value={date} onChange={setDate} />
         </div>
 
         <div

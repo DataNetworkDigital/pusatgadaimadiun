@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Modal from '../common/Modal';
 import CurrencyInput from '../common/CurrencyInput';
+import DateField from '../common/DateField';
 import { formatDateInput, fromDateInput } from '../../utils/formatDate';
 
 export default function DebtForm({ open, onClose, onSubmit, initial, defaultType }) {
@@ -80,11 +81,11 @@ export default function DebtForm({ open, onClose, onSubmit, initial, defaultType
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="label-text">Tanggal Mulai</label>
-            <input type="date" className="input-field" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <DateField value={startDate} onChange={setStartDate} />
           </div>
           <div>
             <label className="label-text">Jatuh Tempo</label>
-            <input type="date" className="input-field" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+            <DateField value={dueDate} onChange={setDueDate} />
           </div>
         </div>
         <div>

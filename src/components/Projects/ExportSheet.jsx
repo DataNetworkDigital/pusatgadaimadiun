@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Modal from '../common/Modal';
+import DateField from '../common/DateField';
 import { fromDateInput, formatDate } from '../../utils/formatDate';
 import {
   IcDownload,
@@ -139,23 +140,17 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
                 <label className="text-[11px] text-ink-mute font-semibold uppercase tracking-[0.3px]">
                   Dari
                 </label>
-                <input
-                  type="date"
-                  className="input-field !py-2 !text-[13px] mt-1"
-                  value={from}
-                  onChange={(e) => setFrom(e.target.value)}
-                />
+                <div className="mt-1">
+                  <DateField value={from} onChange={setFrom} />
+                </div>
               </div>
               <div>
                 <label className="text-[11px] text-ink-mute font-semibold uppercase tracking-[0.3px]">
                   Sampai
                 </label>
-                <input
-                  type="date"
-                  className="input-field !py-2 !text-[13px] mt-1"
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                />
+                <div className="mt-1">
+                  <DateField value={to} onChange={setTo} />
+                </div>
               </div>
             </div>
           )}

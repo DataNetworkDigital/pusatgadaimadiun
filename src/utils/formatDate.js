@@ -17,10 +17,11 @@ export function toDate(value) {
 export function formatDate(value, opts = {}) {
   const d = toDate(value);
   if (!d) return '-';
-  const { withYear = true, short = false } = opts;
-  const months = short ? MONTHS_SHORT : MONTHS;
-  const month = months[d.getMonth()];
-  return withYear ? `${d.getDate()} ${month} ${d.getFullYear()}` : `${d.getDate()} ${month}`;
+  const { withYear = true } = opts;
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  // Numeric dd/mm/yyyy across the whole app for a single, unambiguous format.
+  return withYear ? `${dd}/${mm}/${d.getFullYear()}` : `${dd}/${mm}`;
 }
 
 export function formatDateInput(value) {

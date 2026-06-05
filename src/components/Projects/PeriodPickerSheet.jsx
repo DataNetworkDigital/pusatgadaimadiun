@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Modal from '../common/Modal';
+import DateField from '../common/DateField';
 import { formatDateInput, fromDateInput } from '../../utils/formatDate';
 import { IcCheck } from '../common/icons';
 
@@ -99,23 +100,11 @@ export default function PeriodPickerSheet({ open, onClose, value, onChange }) {
         <form onSubmit={applyCustom} className="space-y-3">
           <div>
             <label className="label-text">Dari</label>
-            <input
-              type="date"
-              className="input-field"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-              required
-            />
+            <DateField value={from} onChange={setFrom} />
           </div>
           <div>
             <label className="label-text">Sampai</label>
-            <input
-              type="date"
-              className="input-field"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              required
-            />
+            <DateField value={to} onChange={setTo} />
           </div>
           <div className="flex gap-2 pt-2">
             <button
