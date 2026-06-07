@@ -6,7 +6,7 @@ import { projectSummary, findNextDuePayment } from '../../utils/projectSchedule'
 import Pill from '../common/Pill';
 import { IcCalendar, IcChevronRight } from '../common/icons';
 
-export default function ProjectCard({ project }) {
+export default function ProjectCard({ project, index }) {
   const { isDemo } = useDemo();
   const base = isDemo ? '/demo' : '';
   const summary = projectSummary(project);
@@ -62,6 +62,11 @@ export default function ProjectCard({ project }) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
+            {index != null && (
+              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded-md bg-cream-deep text-ink-soft text-[11px] font-bold flex-shrink-0 tabular-nums">
+                {index}
+              </span>
+            )}
             <span className="font-display text-[16px] font-semibold text-ink leading-tight truncate">
               {project.name}
             </span>

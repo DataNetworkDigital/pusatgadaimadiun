@@ -201,8 +201,8 @@ export default function ProjectList() {
         </div>
       ) : (
         <div className="space-y-3">
-          {list.map((p) => (
-            <ProjectCard key={p.id} project={p} />
+          {list.map((p, i) => (
+            <ProjectCard key={p.id} project={p} index={i + 1} />
           ))}
         </div>
       )}

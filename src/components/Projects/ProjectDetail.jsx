@@ -268,8 +268,8 @@ export default function ProjectDetail() {
           valueClass="text-daun"
         />
         <StatRow
-          label={profit >= 0 ? 'Laba (s/d sekarang)' : 'Rugi (s/d sekarang)'}
-          value={`${profit >= 0 ? '+' : ''}${formatCurrency(profit)}`}
+          label={profit >= 0 ? 'Laba (s/d sekarang)' : 'Piutang (s/d sekarang)'}
+          value={profit >= 0 ? `+${formatCurrency(profit)}` : formatCurrency(Math.abs(profit))}
           valueClass={profit >= 0 ? 'text-daun' : 'text-terra'}
           isLast={!isDefault || project.lossAmount == null}
         />

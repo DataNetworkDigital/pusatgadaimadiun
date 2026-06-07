@@ -82,7 +82,9 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
     ? DEFAULT_RETURN_PCT
     : Number(monthlyReturnPct);
   const interestPerMonth = calcMonthlyInterest(principalAmount || 0, effectiveReturnPct);
-  const totalReturn = interestPerMonth * (Number(durationMonths) || 0);
+  // Final month is the pelunasan (principal only), so interest accrues for duration − 1 months.
+  const interestMonths = Math.max(0, (Number(durationMonths) || 0) - 1);
+  const totalReturn = interestPerMonth * interestMonths;
   const upfrontDiscount = (Number(principalAmount) || 0) - (Number(disbursedAmount) || 0);
 
   async function handleSubmit(e) {
@@ -279,7 +281,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
             </span>
           </div>
           <div className="flex justify-between">
-            <span>Total return ({durationMonths || 0}× bulan)</span>
+            <span>Total return ({interestMonths}× bulan)</span>
             <span
               className="font-num font-semibold"
               style={{ fontVariantNumeric: 'tabular-nums' }}

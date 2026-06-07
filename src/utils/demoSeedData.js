@@ -131,7 +131,7 @@ export function buildDemoSeed() {
     const due = new Date(activeStart);
     due.setMonth(due.getMonth() + i);
     const isFinal = i === 6;
-    const expected = isFinal ? activeInterest + activePrincipal : activeInterest;
+    const expected = isFinal ? activePrincipal : activeInterest;
     const received = i <= 2;
     projectActivePayments.push({
       no: i,
@@ -155,7 +155,7 @@ export function buildDemoSeed() {
     const due = new Date(doneStart);
     due.setMonth(due.getMonth() + i);
     const isFinal = i === 3;
-    const expected = isFinal ? doneInterest + donePrincipal : doneInterest;
+    const expected = isFinal ? donePrincipal : doneInterest;
     projectDonePayments.push({
       no: i,
       dueDate: ts(due),

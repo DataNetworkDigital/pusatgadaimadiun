@@ -54,7 +54,8 @@ export function recomputeUnpaidSchedule(existingPayments, {
         no: i,
         dueDate: Timestamp.fromDate(due),
         type: isLast ? 'final' : 'interest',
-        expectedAmount: isLast ? interest + principal : interest,
+        // Final payment (pelunasan) returns the project value (principal) only.
+        expectedAmount: isLast ? principal : interest,
         receivedAmount: null,
         receivedDate: null,
         transactionId: null,
@@ -86,7 +87,8 @@ export function generateProjectSchedule({
       no: i,
       dueDate: Timestamp.fromDate(due),
       type: isLast ? 'final' : 'interest',
-      expectedAmount: isLast ? interest + principal : interest,
+      // Final payment (pelunasan) returns the project value (principal) only.
+      expectedAmount: isLast ? principal : interest,
       receivedAmount: null,
       receivedDate: null,
       transactionId: null,
