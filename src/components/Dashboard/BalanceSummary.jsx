@@ -2,10 +2,10 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { monthLabel } from '../../utils/formatDate';
 import KawungMark from '../common/KawungMark';
 import BatikPattern from '../common/BatikPattern';
-import { IcArrowDown, IcArrowUp } from '../common/icons';
+import { IcArrowDown, IcArrowUp, IcChevronLeft, IcChevronRight } from '../common/icons';
 
-export default function BalanceSummary({ totalBalance, income, expense }) {
-  const month = monthLabel(new Date());
+export default function BalanceSummary({ totalBalance, income, expense, monthDate, onPrev, onNext, canGoNext = true }) {
+  const month = monthLabel(monthDate || new Date());
   return (
     <div className="bg-indigo text-cream rounded-[22px] p-[22px] relative overflow-hidden shadow-hero">
       <BatikPattern opacity={0.1} color="#F8F1E2" />
@@ -18,7 +18,26 @@ export default function BalanceSummary({ totalBalance, income, expense }) {
               <div className="text-[11px] opacity-70">Pusat Gadai Madiun</div>
             </div>
           </div>
-          <div className="text-[11px] opacity-75">{month}</div>
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={onPrev}
+              aria-label="Bulan sebelumnya"
+              className="w-7 h-7 rounded-lg flex items-center justify-center active:bg-cream/15 transition"
+            >
+              <IcChevronLeft size={15} stroke="#F8F1E2" sw={2} />
+            </button>
+            <div className="text-[11px] opacity-90 min-w-[68px] text-center tabular-nums">{month}</div>
+            <button
+              type="button"
+              onClick={onNext}
+              disabled={!canGoNext}
+              aria-label="Bulan berikutnya"
+              className="w-7 h-7 rounded-lg flex items-center justify-center active:bg-cream/15 transition disabled:opacity-25"
+            >
+              <IcChevronRight size={15} stroke="#F8F1E2" sw={2} />
+            </button>
+          </div>
         </div>
 
         <div className="text-[12px] uppercase tracking-[0.3px] opacity-80">Total Saldo</div>

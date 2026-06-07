@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useData } from '../../contexts/DataContext';
 import { useDemo } from '../../contexts/DemoContext';
@@ -73,10 +73,12 @@ export default function DashboardPage() {
   const { isDemo } = useDemo();
   const base = isDemo ? '/demo' : '';
 
-  const { monthIncome, monthExpense, chartData, recent } = useMemo(() => {
-    const now = new Date();
-    const start = startOfMonth(now);
-    const end = endOfMonth(now);
+  const [selectedMonth, setSelectedMonth] = useState(() => startOfMonth(new Date()));
+
+  // Income / expense for the month the user is viewing
+  const { monthIncome, monthExpense } = useMemo(() => {
+    const start = startOfMonth(selectedMonth);
+    const end = endOfMonth(selectedMonth);
     let inc = 0;
     let exp = 0;
     transactions.forEach((tx) => {
@@ -85,6 +87,12 @@ export default function DashboardPage() {
       if (tx.type === 'income') inc += tx.amount;
       else if (tx.type === 'expense') exp += tx.amount;
     });
+    return { monthIncome: inc, monthExpense: exp };
+  }, [transactions, selectedMonth]);
+
+  // 6-month chart + recent list always anchored to the current month
+  const { chartData, recent } = useMemo(() => {
+    const now = new Date();
     const months = [];
     for (let i = 5; i >= 0; i--) {
       const m = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -100,13 +108,12 @@ export default function DashboardPage() {
       });
       months.push({ label: MONTHS_SHORT[m.getMonth()], Pemasukan: mi, Pengeluaran: me });
     }
-    return {
-      monthIncome: inc,
-      monthExpense: exp,
-      chartData: months,
-      recent: transactions.slice(0, 5),
-    };
+    return { chartData: months, recent: transactions.slice(0, 5) };
   }, [transactions]);
+
+  const goPrevMonth = () => setSelectedMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1));
+  const goNextMonth = () => setSelectedMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1));
+  const canGoNextMonth = startOfMonth(selectedMonth) < startOfMonth(new Date());
 
   const { overdue, dueSoon } = useMemo(() => {
     const now = new Date();
@@ -156,7 +163,15 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <BalanceSummary totalBalance={totalBalance} income={monthIncome} expense={monthExpense} />
+      <BalanceSummary
+        totalBalance={totalBalance}
+        income={monthIncome}
+        expense={monthExpense}
+        monthDate={selectedMonth}
+        onPrev={goPrevMonth}
+        onNext={goNextMonth}
+        canGoNext={canGoNextMonth}
+      />
 
       {dueItems.length > 0 && (
         <DueBanner

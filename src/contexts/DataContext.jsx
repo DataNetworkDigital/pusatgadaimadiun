@@ -432,6 +432,10 @@ export function DataProvider({ children }) {
       throw new Error('Modal/rekening/tanggal mulai tidak bisa diubah karena sudah ada pembayaran masuk.');
     }
 
+    // When the start date changes, the funding transaction must be re-dated too,
+    // otherwise it stays attributed to the wrong month (e.g. project input month).
+    let newFundingDate = null;
+
     // Schedule-affecting fields
     const scheduleChange =
       data.monthlyReturnPct !== undefined ||
@@ -463,7 +467,10 @@ export function DataProvider({ children }) {
       if (data.monthlyReturnPct !== undefined) update.monthlyReturnPct = newPct;
       if (data.durationMonths !== undefined) update.durationMonths = newDuration;
       if (data.paymentDayOfMonth !== undefined) update.paymentDayOfMonth = newDay;
-      if (data.startDate !== undefined) update.startDate = Timestamp.fromDate(newStart);
+      if (data.startDate !== undefined) {
+        update.startDate = Timestamp.fromDate(newStart);
+        newFundingDate = update.startDate;
+      }
     }
 
     // disbursedAmount and sourceAccountId require batch with account balance adjustment
@@ -489,10 +496,11 @@ export function DataProvider({ children }) {
           balance: increment(-newDisbursed),
           updatedAt: serverTimestamp(),
         });
-        // Update funding transaction
+        // Update funding transaction (re-date it too if the start date changed)
         batch.update(doc(db, C('transactions'), project.fundingTransactionId), {
           amount: newDisbursed,
           fromAccount: newSourceId,
+          ...(newFundingDate ? { date: newFundingDate } : {}),
         });
       }
       update.disbursedAmount = newDisbursed;
@@ -506,7 +514,15 @@ export function DataProvider({ children }) {
     }
 
     if (Object.keys(update).length === 0) return;
-    await updateDoc(doc(db, C('projects'), id), update);
+    if (newFundingDate && project.fundingTransactionId) {
+      // Keep the project doc and its funding transaction date in sync atomically.
+      const batch = writeBatch(db);
+      batch.update(doc(db, C('projects'), id), update);
+      batch.update(doc(db, C('transactions'), project.fundingTransactionId), { date: newFundingDate });
+      await batch.commit();
+    } else {
+      await updateDoc(doc(db, C('projects'), id), update);
+    }
     toast('Project tersimpan');
   }
 
