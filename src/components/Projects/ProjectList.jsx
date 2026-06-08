@@ -21,7 +21,8 @@ const SORT_OPTIONS = [
   { id: 'name-desc', label: 'Nama Z–A' },
   { id: 'modal-desc', label: 'Modal terbesar' },
   { id: 'modal-asc', label: 'Modal terkecil' },
-  { id: 'default', label: 'Terbaru ditambah' },
+  { id: 'created-desc', label: 'Terbaru ditambah' },
+  { id: 'created-asc', label: 'Terlama ditambah' },
 ];
 
 export default function ProjectList() {
@@ -53,6 +54,7 @@ export default function ProjectList() {
         )
       : list;
     const startMs = (p) => { const d = toDate(p.startDate); return d ? d.getTime() : 0; };
+    const createdMs = (p) => { const d = toDate(p.createdAt); return d ? d.getTime() : 0; };
     const modal = (p) => Number(p.disbursedAmount) || 0;
     arr = [...arr];
     switch (sort) {
@@ -62,6 +64,8 @@ export default function ProjectList() {
       case 'start-asc': arr.sort((a, b) => startMs(a) - startMs(b)); break;
       case 'modal-desc': arr.sort((a, b) => modal(b) - modal(a)); break;
       case 'modal-asc': arr.sort((a, b) => modal(a) - modal(b)); break;
+      case 'created-asc': arr.sort((a, b) => createdMs(a) - createdMs(b)); break;
+      case 'created-desc': arr.sort((a, b) => createdMs(b) - createdMs(a)); break;
       default: break; // keep original (createdAt desc) order
     }
     return arr;
