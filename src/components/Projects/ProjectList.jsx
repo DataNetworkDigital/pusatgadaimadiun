@@ -3,6 +3,7 @@ import { useData } from '../../contexts/DataContext';
 import PageHeader from '../common/PageHeader';
 import IconButton from '../common/IconButton';
 import Card from '../common/Card';
+import Modal from '../common/Modal';
 import ProjectCard from './ProjectCard';
 import ProjectForm from './ProjectForm';
 import ExportSheet from './ExportSheet';
@@ -11,7 +12,17 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { projectSummary } from '../../utils/projectSchedule';
 import { exportProjectsToExcel, exportProjectsToPdf } from '../../utils/projectExport';
 import { toDate, formatDate } from '../../utils/formatDate';
-import { IcPlus, IcDownload, IcChevronRight } from '../common/icons';
+import { IcPlus, IcDownload, IcChevronRight, IcSearch, IcSort, IcCheck } from '../common/icons';
+
+const SORT_OPTIONS = [
+  { id: 'default', label: 'Default (terbaru ditambah)' },
+  { id: 'name-asc', label: 'Nama A–Z' },
+  { id: 'name-desc', label: 'Nama Z–A' },
+  { id: 'start-desc', label: 'Tanggal mulai terbaru' },
+  { id: 'start-asc', label: 'Tanggal mulai terlama' },
+  { id: 'modal-desc', label: 'Modal terbesar' },
+  { id: 'modal-asc', label: 'Modal terkecil' },
+];
 
 export default function ProjectList() {
   const { projects, accounts, addProject } = useData();
@@ -20,6 +31,9 @@ export default function ProjectList() {
   const [exportOpen, setExportOpen] = useState(false);
   const [period, setPeriod] = useState({ id: 'this-month' });
   const [periodOpen, setPeriodOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState('default');
+  const [sortOpen, setSortOpen] = useState(false);
   const range = useMemo(() => resolvePeriod(period), [period]);
 
   const active = useMemo(() => projects.filter((p) => p.status === 'active'), [projects]);
@@ -28,6 +42,32 @@ export default function ProjectList() {
     [projects]
   );
   const list = tab === 'active' ? active : archived;
+
+  const displayList = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let arr = q
+      ? list.filter(
+          (p) =>
+            (p.name || '').toLowerCase().includes(q) ||
+            (p.ownerName || '').toLowerCase().includes(q)
+        )
+      : list;
+    const startMs = (p) => { const d = toDate(p.startDate); return d ? d.getTime() : 0; };
+    const modal = (p) => Number(p.disbursedAmount) || 0;
+    arr = [...arr];
+    switch (sort) {
+      case 'name-asc': arr.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id')); break;
+      case 'name-desc': arr.sort((a, b) => (b.name || '').localeCompare(a.name || '', 'id')); break;
+      case 'start-desc': arr.sort((a, b) => startMs(b) - startMs(a)); break;
+      case 'start-asc': arr.sort((a, b) => startMs(a) - startMs(b)); break;
+      case 'modal-desc': arr.sort((a, b) => modal(b) - modal(a)); break;
+      case 'modal-asc': arr.sort((a, b) => modal(a) - modal(b)); break;
+      default: break; // keep original (createdAt desc) order
+    }
+    return arr;
+  }, [list, search, sort]);
+
+  const activeSortLabel = SORT_OPTIONS.find((o) => o.id === sort)?.label;
 
   const totals = useMemo(() => {
     let modal = 0;
@@ -178,6 +218,32 @@ export default function ProjectList() {
         </>
       )}
 
+      {list.length > 0 && (
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative flex-1">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-mute pointer-events-none">
+              <IcSearch size={16} sw={2} />
+            </span>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Cari project…"
+              className="w-full bg-paper border border-line rounded-xl pl-9 pr-3 py-2.5 text-[14px] text-ink placeholder-ink-mute focus:outline-none focus:border-indigo focus:ring-2 focus:ring-indigo-soft"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setSortOpen(true)}
+            aria-label="Urutkan project"
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-paper border border-line text-ink-soft active:bg-cream-deep flex-shrink-0"
+          >
+            <IcSort size={16} sw={2} />
+            <span className="text-[13px] font-medium">Urut</span>
+          </button>
+        </div>
+      )}
+
       {list.length === 0 ? (
         <div className="py-16 px-5 text-center">
           <div className="text-4xl mb-3">💼</div>
@@ -199,9 +265,18 @@ export default function ProjectList() {
             </button>
           )}
         </div>
+      ) : displayList.length === 0 ? (
+        <div className="py-12 px-5 text-center text-[14px] text-ink-mute">
+          Tidak ada project cocok dengan “{search}”.
+        </div>
       ) : (
         <div className="space-y-3">
-          {list.map((p, i) => (
+          {search.trim() && (
+            <div className="text-[12px] text-ink-mute px-1">
+              {displayList.length} hasil · urut: {activeSortLabel}
+            </div>
+          )}
+          {displayList.map((p, i) => (
             <ProjectCard key={p.id} project={p} index={i + 1} />
           ))}
         </div>
@@ -226,6 +301,26 @@ export default function ProjectList() {
         value={period}
         onChange={setPeriod}
       />
+      <Modal open={sortOpen} onClose={() => setSortOpen(false)} title="Urutkan Project">
+        <div className="space-y-1">
+          {SORT_OPTIONS.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => {
+                setSort(o.id);
+                setSortOpen(false);
+              }}
+              className="w-full flex items-center justify-between px-3 py-3 rounded-xl text-left active:bg-cream-deep"
+            >
+              <span className={`text-[15px] ${sort === o.id ? 'font-semibold text-indigo' : 'text-ink'}`}>
+                {o.label}
+              </span>
+              {sort === o.id && <IcCheck size={18} stroke="#3F5C8A" sw={2.2} />}
+            </button>
+          ))}
+        </div>
+      </Modal>
     </div>
   );
 }

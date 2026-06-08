@@ -103,6 +103,12 @@ export const IcFilter = (p) => (
     <path d="M3 5h18l-7 9v6l-4-2v-4L3 5z" />
   </Icon>
 );
+
+export const IcSort = (p) => (
+  <Icon {...p}>
+    <path d="M4 6h16M6 12h12M9 18h6" />
+  </Icon>
+);
 export const IcAlert = (p) => (
   <Icon {...p}>
     <path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" />
