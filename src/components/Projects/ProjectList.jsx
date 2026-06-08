@@ -15,13 +15,13 @@ import { toDate, formatDate } from '../../utils/formatDate';
 import { IcPlus, IcDownload, IcChevronRight, IcSearch, IcSort, IcCheck } from '../common/icons';
 
 const SORT_OPTIONS = [
-  { id: 'default', label: 'Default (terbaru ditambah)' },
+  { id: 'start-asc', label: 'Tanggal mulai terlama' },
+  { id: 'start-desc', label: 'Tanggal mulai terbaru' },
   { id: 'name-asc', label: 'Nama A–Z' },
   { id: 'name-desc', label: 'Nama Z–A' },
-  { id: 'start-desc', label: 'Tanggal mulai terbaru' },
-  { id: 'start-asc', label: 'Tanggal mulai terlama' },
   { id: 'modal-desc', label: 'Modal terbesar' },
   { id: 'modal-asc', label: 'Modal terkecil' },
+  { id: 'default', label: 'Terbaru ditambah' },
 ];
 
 export default function ProjectList() {
@@ -32,7 +32,7 @@ export default function ProjectList() {
   const [period, setPeriod] = useState({ id: 'this-month' });
   const [periodOpen, setPeriodOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState('default');
+  const [sort, setSort] = useState('start-asc');
   const [sortOpen, setSortOpen] = useState(false);
   const range = useMemo(() => resolvePeriod(period), [period]);
 
