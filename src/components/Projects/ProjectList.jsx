@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useData } from '../../contexts/DataContext';
+import { useProjectUi } from '../../contexts/ProjectUiContext';
 import PageHeader from '../common/PageHeader';
 import IconButton from '../common/IconButton';
 import Card from '../common/Card';
@@ -25,15 +26,18 @@ const SORT_OPTIONS = [
   { id: 'created-asc', label: 'Terlama ditambah' },
 ];
 
+// Descending sorts: the "#1" project sits at the bottom, so the badge counts
+// down from the top (top = highest number). Ascending sorts count up (top = 1).
+const DESC_SORTS = new Set(['start-desc', 'modal-desc', 'name-desc', 'created-desc']);
+
 export default function ProjectList() {
   const { projects, accounts, addProject } = useData();
-  const [tab, setTab] = useState('active');
+  // tab / search / sort persist across detail navigation (reset on reload / PIN)
+  const { tab, setTab, search, setSearch, sort, setSort } = useProjectUi();
   const [formOpen, setFormOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [period, setPeriod] = useState({ id: 'this-month' });
   const [periodOpen, setPeriodOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState('start-asc');
   const [sortOpen, setSortOpen] = useState(false);
   const range = useMemo(() => resolvePeriod(period), [period]);
 
@@ -281,7 +285,11 @@ export default function ProjectList() {
             </div>
           )}
           {displayList.map((p, i) => (
-            <ProjectCard key={p.id} project={p} index={i + 1} />
+            <ProjectCard
+              key={p.id}
+              project={p}
+              index={DESC_SORTS.has(sort) ? displayList.length - i : i + 1}
+            />
           ))}
         </div>
       )}

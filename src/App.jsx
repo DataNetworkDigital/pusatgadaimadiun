@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
 import { DemoProvider } from './contexts/DemoContext';
 import { ToastProvider } from './contexts/ToastContext';
+import { ProjectUiProvider } from './contexts/ProjectUiContext';
 import PinScreen from './components/PinLock/PinScreen';
 import AppLayout from './components/Layout/AppLayout';
 import DashboardPage from './components/Dashboard/DashboardPage';
@@ -35,7 +36,8 @@ function MissingFirebaseConfig() {
 
 function AppRoutes() {
   return (
-    <Routes>
+    <ProjectUiProvider>
+      <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<DashboardPage />} />
         <Route path="rekening" element={<AccountList />} />
@@ -53,7 +55,8 @@ function AppRoutes() {
         <Route path="utang" element={<Navigate to="../catatan/utang" replace />} />
         <Route path="*" element={<DashboardPage />} />
       </Route>
-    </Routes>
+      </Routes>
+    </ProjectUiProvider>
   );
 }
 
