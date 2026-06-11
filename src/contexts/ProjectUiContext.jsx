@@ -9,7 +9,7 @@ const ProjectUiContext = createContext(null);
 export function ProjectUiProvider({ children }) {
   const [tab, setTab] = useState('active');
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState('start-asc');
+  const [sort, setSort] = useState('start-desc');
   return (
     <ProjectUiContext.Provider value={{ tab, setTab, search, setSearch, sort, setSort }}>
       {children}

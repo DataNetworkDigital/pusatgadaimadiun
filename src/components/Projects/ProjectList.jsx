@@ -16,8 +16,8 @@ import { toDate, formatDate } from '../../utils/formatDate';
 import { IcPlus, IcDownload, IcChevronRight, IcSearch, IcSort, IcCheck } from '../common/icons';
 
 const SORT_OPTIONS = [
-  { id: 'start-asc', label: 'Tanggal mulai terlama' },
   { id: 'start-desc', label: 'Tanggal mulai terbaru' },
+  { id: 'start-asc', label: 'Tanggal mulai terlama' },
   { id: 'name-asc', label: 'Nama A–Z' },
   { id: 'name-desc', label: 'Nama Z–A' },
   { id: 'modal-desc', label: 'Modal terbesar' },
