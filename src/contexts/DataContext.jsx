@@ -8,6 +8,7 @@ import { useAuth } from './AuthContext';
 import { useDemo } from './DemoContext';
 import { useToast } from './ToastContext';
 import { generateProjectSchedule, recomputeUnpaidSchedule } from '../utils/projectSchedule';
+import { notifyTelegram } from '../utils/telegram';
 
 const DataContext = createContext(null);
 
@@ -395,6 +396,18 @@ export function DataProvider({ children }) {
 
     await batch.commit();
     toast('Project berhasil dibuat');
+
+    const acct = accounts.find((a) => a.id === data.sourceAccountId);
+    notifyTelegram(
+      `🆕 <b>Project Baru</b>\n` +
+      `Nama: ${data.name}\n` +
+      `Pemilik: ${data.ownerName || '-'}\n` +
+      `Nilai: Rp ${Number(principalAmount).toLocaleString('id-ID')}\n` +
+      `Modal keluar: Rp ${Number(disbursedAmount).toLocaleString('id-ID')}\n` +
+      `Return: ${monthlyReturnPct}%/bln × ${durationMonths} bln\n` +
+      `Rekening: ${acct?.name || '-'}`
+    );
+
     return projectRef.id;
   }
 
