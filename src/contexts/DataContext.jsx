@@ -8,7 +8,7 @@ import { useAuth } from './AuthContext';
 import { useDemo } from './DemoContext';
 import { useToast } from './ToastContext';
 import { generateProjectSchedule, recomputeUnpaidSchedule } from '../utils/projectSchedule';
-import { notifyTelegram } from '../utils/telegram';
+import { notifyTelegram, syncToDanaTrack } from '../utils/telegram';
 
 const DataContext = createContext(null);
 
@@ -407,6 +407,8 @@ export function DataProvider({ children }) {
       `Return: ${monthlyReturnPct}%/bln × ${durationMonths} bln\n` +
       `Rekening: ${acct?.name || '-'}`
     );
+
+    syncToDanaTrack({ name: data.name, principalAmount, disbursedAmount, monthlyReturnPct, durationMonths, startDate });
 
     return projectRef.id;
   }
