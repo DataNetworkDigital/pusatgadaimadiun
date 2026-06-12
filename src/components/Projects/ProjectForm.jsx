@@ -6,7 +6,7 @@ import { formatDateInput, fromDateInput } from '../../utils/formatDate';
 import { calcMonthlyInterest } from '../../utils/projectSchedule';
 import { formatCurrency } from '../../utils/formatCurrency';
 
-const DEFAULT_RETURN_PCT = 5;
+const DEFAULT_RETURN_PCT = 5.5;
 
 // Disbursed auto-fills as the project value minus the monthly return %
 // taken upfront, e.g. 100jt at 5% → (100% − 5%) × 100jt = 95jt.
