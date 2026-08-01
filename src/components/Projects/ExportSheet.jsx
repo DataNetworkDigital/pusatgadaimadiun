@@ -10,7 +10,7 @@ import {
   IcCheck,
 } from '../common/icons';
 
-export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf, counts }) {
+export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf, onExportCollection, counts }) {
   const [step, setStep] = useState('home');
   const [useDateFilter, setUseDateFilter] = useState(false);
   const [from, setFrom] = useState('');
@@ -60,6 +60,20 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
       onClick: () => setStep('pdf'),
       disabled: counts.total === 0,
     },
+    {
+      key: 'collection',
+      label: 'Daftar Tagihan (buat penagih)',
+      hint: 'Siapa, kapan, di mana harus ditagih · PDF + Excel',
+      Icon: IcReceipt,
+      iconBg: 'bg-emas-soft',
+      iconColor: '#C9952F',
+      onClick: () => {
+        setFrom('');
+        setTo('');
+        setStep('collection');
+      },
+      disabled: counts.total === 0,
+    },
   ];
 
   const pdfItems = [
@@ -92,16 +106,21 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
   ];
 
   const isPdf = step === 'pdf';
+  const isCollection = step === 'collection';
   const items = isPdf ? pdfItems : homeItems;
+  const collectionFilter =
+    from && to ? { from: fromDateInput(from), to: fromDateInput(to) } : null;
+
+  const title = isPdf ? 'Cakupan PDF' : isCollection ? 'Daftar Tagihan' : 'Export Project';
+  const subtitle = isPdf
+    ? 'Pilih project mana yang masuk ke PDF'
+    : isCollection
+      ? 'Pilih periode jatuh tempo tagihan'
+      : 'Pilih format yang mau diunduh';
 
   return (
-    <Modal
-      open={open}
-      onClose={close}
-      title={isPdf ? 'Cakupan PDF' : 'Export Project'}
-      subtitle={isPdf ? 'Pilih project mana yang masuk ke PDF' : 'Pilih format yang mau diunduh'}
-    >
-      {isPdf && (
+    <Modal open={open} onClose={close} title={title} subtitle={subtitle}>
+      {(isPdf || isCollection) && (
         <button
           type="button"
           onClick={() => setStep('home')}
@@ -111,7 +130,56 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
         </button>
       )}
 
-      {!isPdf && (
+      {isCollection && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-line bg-paper p-3">
+            <div className="text-[13px] font-semibold text-ink mb-2">
+              Periode jatuh tempo tagihan
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[11px] text-ink-mute font-semibold uppercase tracking-[0.3px]">
+                  Dari
+                </label>
+                <div className="mt-1">
+                  <DateField value={from} onChange={setFrom} />
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] text-ink-mute font-semibold uppercase tracking-[0.3px]">
+                  Sampai
+                </label>
+                <div className="mt-1">
+                  <DateField value={to} onChange={setTo} />
+                </div>
+              </div>
+            </div>
+            {from && to && (
+              <p className="text-[11px] text-indigo mt-2">
+                {formatDate(fromDateInput(from), { short: true })} –{' '}
+                {formatDate(fromDateInput(to), { short: true })}
+              </p>
+            )}
+          </div>
+
+          <p className="text-[12px] text-ink-mute leading-snug">
+            Berisi semua tagihan yang jatuh tempo di periode ini (sudah & belum
+            dibayar), lengkap dengan nama, no HP, alamat, dan agunan. Dapat 2 file:
+            PDF dan Excel.
+          </p>
+
+          <button
+            type="button"
+            disabled={!collectionFilter}
+            onClick={() => fire(() => onExportCollection(collectionFilter))}
+            className="w-full py-3 rounded-xl bg-indigo text-cream font-semibold text-[15px] active:bg-indigo-deep disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Download PDF + Excel
+          </button>
+        </div>
+      )}
+
+      {!isPdf && !isCollection && (
         <div className="mb-4 rounded-2xl border border-line bg-paper p-3">
           <button
             type="button"
@@ -163,6 +231,7 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
         </div>
       )}
 
+      {!isCollection && (
       <div className="space-y-2">
         {items.map(({ key, label, hint, Icon, iconBg, iconColor, onClick, disabled }) => (
           <button
@@ -187,6 +256,7 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
           </button>
         ))}
       </div>
+      )}
     </Modal>
   );
 }

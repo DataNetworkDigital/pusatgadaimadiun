@@ -8,6 +8,7 @@ import Pill from '../common/Pill';
 import ConfirmDialog from '../common/ConfirmDialog';
 import PaymentConfirmSheet from './PaymentConfirmSheet';
 import CloseProjectSheet from './CloseProjectSheet';
+import SettleProjectSheet from './SettleProjectSheet';
 import ProjectForm from './ProjectForm';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
@@ -116,10 +117,11 @@ export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDemo } = useDemo();
-  const { projects, accounts, recordProjectPayment, updateProjectPayment, closeProjectAsDefault, deleteProject, updateProject } =
+  const { projects, accounts, recordProjectPayment, updateProjectPayment, closeProjectAsDefault, settleProjectEarly, deleteProject, updateProject } =
     useData();
   const [paying, setPaying] = useState(null);
   const [closing, setClosing] = useState(false);
+  const [settling, setSettling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -148,6 +150,13 @@ export default function ProjectDetail() {
   ); // received side
   const totalReturnReceived = summary.receivedSoFar;
   const profit = totalReturnReceived - (project.disbursedAmount || 0);
+  // Return rate display: tiered projects show both rates, else the single rate.
+  const rTier1 = project.returnPctTier1 != null ? project.returnPctTier1 : project.monthlyReturnPct;
+  const rTier2 = project.returnPctTier2 != null ? project.returnPctTier2 : rTier1;
+  const isTieredRate = rTier2 !== rTier1 && (project.durationMonths || 0) > 3;
+  const returnRateLabel = isTieredRate
+    ? `${rTier1}% (bln 1-3) / ${rTier2}% (bln 4+)`
+    : `${rTier1}% · ${formatCurrency((project.principalAmount * rTier1) / 100)}`;
 
   async function handleConfirmPayment(data) {
     if (!paying) return;
@@ -160,6 +169,10 @@ export default function ProjectDetail() {
 
   async function handleClose(data) {
     await closeProjectAsDefault(project.id, data);
+  }
+
+  async function handleSettle(data) {
+    await settleProjectEarly(project.id, data);
   }
 
   async function handleDelete() {
@@ -224,6 +237,18 @@ export default function ProjectDetail() {
         {project.ownerName && (
           <StatRow label="Pemilik" value={project.ownerName} />
         )}
+        {project.phone && (
+          <StatRow label="No. HP" value={project.phone} />
+        )}
+        {project.nik && (
+          <StatRow label="NIK" value={project.nik} />
+        )}
+        {project.address && (
+          <StatRow label="Alamat" value={project.address} />
+        )}
+        {project.collateral && (
+          <StatRow label="Agunan" value={project.collateral} />
+        )}
         {project.contractNumber && (
           <StatRow label="No. Kontrak" value={project.contractNumber} />
         )}
@@ -244,12 +269,7 @@ export default function ProjectDetail() {
             }
           />
         )}
-        <StatRow
-          label="Return / Bulan"
-          value={`${project.monthlyReturnPct}% · ${formatCurrency(
-            (project.principalAmount * project.monthlyReturnPct) / 100
-          )}`}
-        />
+        <StatRow label="Return / Bulan" value={returnRateLabel} />
         <StatRow
           label="Durasi"
           value={`${project.durationMonths} bulan`}
@@ -313,30 +333,41 @@ export default function ProjectDetail() {
       </Card>
 
       {isActive && (
-        <div className="flex gap-2 mb-3.5">
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="flex-1 py-3 rounded-xl bg-indigo-soft text-indigo font-semibold text-[14px] active:opacity-80 flex items-center justify-center gap-1.5"
-          >
-            <IcEdit size={16} sw={2} />
-            Edit Project
-          </button>
-          <button
-            type="button"
-            onClick={() => setClosing(true)}
-            className="flex-1 py-3 rounded-xl bg-terra-soft text-terra font-semibold text-[14px] active:opacity-80"
-          >
-            Tutup sebagai Macet
-          </button>
-          <button
-            type="button"
-            onClick={() => setDeleting(true)}
-            className="w-12 h-12 rounded-xl bg-terra-soft text-terra flex items-center justify-center active:opacity-80 flex-shrink-0"
-            aria-label="Hapus project"
-          >
-            <IcTrash size={18} sw={1.9} />
-          </button>
+        <div className="space-y-2 mb-3.5">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="flex-1 py-3 rounded-xl bg-indigo-soft text-indigo font-semibold text-[14px] active:opacity-80 flex items-center justify-center gap-1.5"
+            >
+              <IcEdit size={16} sw={2} />
+              Edit Project
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeleting(true)}
+              className="w-12 h-12 rounded-xl bg-terra-soft text-terra flex items-center justify-center active:opacity-80 flex-shrink-0"
+              aria-label="Batalkan project"
+            >
+              <IcTrash size={18} sw={1.9} />
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setSettling(true)}
+              className="flex-1 py-3 rounded-xl bg-daun-soft text-daun font-semibold text-[14px] active:opacity-80"
+            >
+              Tutup: Pelunasan
+            </button>
+            <button
+              type="button"
+              onClick={() => setClosing(true)}
+              className="flex-1 py-3 rounded-xl bg-terra-soft text-terra font-semibold text-[14px] active:opacity-80"
+            >
+              Tutup: Macet
+            </button>
+          </div>
         </div>
       )}
 
@@ -362,6 +393,13 @@ export default function ProjectDetail() {
         project={project}
         accounts={accounts}
         onConfirm={handleClose}
+      />
+      <SettleProjectSheet
+        open={settling}
+        onClose={() => setSettling(false)}
+        project={project}
+        accounts={accounts}
+        onConfirm={handleSettle}
       />
       <ConfirmDialog
         open={deleting}

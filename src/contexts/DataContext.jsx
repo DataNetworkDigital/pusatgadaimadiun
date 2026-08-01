@@ -337,7 +337,15 @@ export function DataProvider({ children }) {
   async function addProject(data) {
     const principalAmount = Number(data.principalAmount) || 0;
     const disbursedAmount = Number(data.disbursedAmount) || 0;
-    const monthlyReturnPct = Number(data.monthlyReturnPct) || 0;
+    // Tiered return: tier1 (months 1-3) + tier2 (months 4+). `monthlyReturnPct`
+    // is kept in sync with tier1 for backward-compatible reads/exports.
+    const returnPctTier1 = data.returnPctTier1 != null
+      ? Number(data.returnPctTier1)
+      : Number(data.monthlyReturnPct) || 0;
+    const returnPctTier2 = data.returnPctTier2 != null
+      ? Number(data.returnPctTier2)
+      : returnPctTier1;
+    const monthlyReturnPct = returnPctTier1;
     const durationMonths = Number(data.durationMonths) || 0;
     const startDate = data.startDate instanceof Date ? data.startDate : data.startDate?.toDate?.() || new Date();
     const paymentDayOfMonth = Number(data.paymentDayOfMonth) || startDate.getDate();
@@ -348,7 +356,8 @@ export function DataProvider({ children }) {
 
     const payments = generateProjectSchedule({
       principalAmount,
-      monthlyReturnPct,
+      returnPctTier1,
+      returnPctTier2,
       durationMonths,
       startDate,
       paymentDayOfMonth,
@@ -378,10 +387,16 @@ export function DataProvider({ children }) {
       name: data.name,
       ownerName: data.ownerName || null,
       contractNumber: data.contractNumber || null,
+      phone: data.phone || null,
+      nik: data.nik || null,
+      address: data.address || null,
+      collateral: data.collateral || null,
       description: data.description || '',
       principalAmount,
       disbursedAmount,
       monthlyReturnPct,
+      returnPctTier1,
+      returnPctTier2,
       durationMonths,
       startDate: Timestamp.fromDate(startDate),
       paymentDayOfMonth,
@@ -398,13 +413,20 @@ export function DataProvider({ children }) {
     toast('Project berhasil dibuat');
 
     const acct = accounts.find((a) => a.id === data.sourceAccountId);
+    const rateLabel = returnPctTier2 !== returnPctTier1
+      ? `${returnPctTier1}% (bln 1-3) / ${returnPctTier2}% (bln 4+)`
+      : `${returnPctTier1}%/bln`;
     notifyTelegram(
       `🆕 <b>Project Baru</b>\n` +
       `Nama: ${data.name}\n` +
       `Pemilik: ${data.ownerName || '-'}\n` +
+      `No HP: ${data.phone || '-'}\n` +
+      `NIK: ${data.nik || '-'}\n` +
+      `Alamat: ${data.address || '-'}\n` +
+      `Agunan: ${data.collateral || '-'}\n` +
       `Nilai: Rp ${Number(principalAmount).toLocaleString('id-ID')}\n` +
       `Modal keluar: Rp ${Number(disbursedAmount).toLocaleString('id-ID')}\n` +
-      `Return: ${monthlyReturnPct}%/bln × ${durationMonths} bln\n` +
+      `Return: ${rateLabel} × ${durationMonths} bln\n` +
       `Rekening: ${acct?.name || '-'}`
     );
 
@@ -423,6 +445,10 @@ export function DataProvider({ children }) {
     if (data.name !== undefined) update.name = data.name;
     if (data.ownerName !== undefined) update.ownerName = data.ownerName;
     if (data.contractNumber !== undefined) update.contractNumber = data.contractNumber;
+    if (data.phone !== undefined) update.phone = data.phone;
+    if (data.nik !== undefined) update.nik = data.nik;
+    if (data.address !== undefined) update.address = data.address;
+    if (data.collateral !== undefined) update.collateral = data.collateral;
     if (data.description !== undefined) update.description = data.description;
     if (data.proofUrl !== undefined) update.proofUrl = data.proofUrl;
     if (data.proofFileName !== undefined) update.proofFileName = data.proofFileName;
@@ -454,6 +480,8 @@ export function DataProvider({ children }) {
     // Schedule-affecting fields
     const scheduleChange =
       data.monthlyReturnPct !== undefined ||
+      data.returnPctTier1 !== undefined ||
+      data.returnPctTier2 !== undefined ||
       data.durationMonths !== undefined ||
       data.paymentDayOfMonth !== undefined ||
       data.principalAmount !== undefined ||
@@ -461,7 +489,14 @@ export function DataProvider({ children }) {
 
     if (scheduleChange) {
       const newPrincipal = data.principalAmount !== undefined ? Number(data.principalAmount) : project.principalAmount;
-      const newPct = data.monthlyReturnPct !== undefined ? Number(data.monthlyReturnPct) : project.monthlyReturnPct;
+      // Resolve tier rates, falling back to the project's existing values (and
+      // legacy flat monthlyReturnPct when tiers were never stored).
+      const curTier1 = project.returnPctTier1 != null ? project.returnPctTier1 : project.monthlyReturnPct;
+      const curTier2 = project.returnPctTier2 != null ? project.returnPctTier2 : curTier1;
+      const newTier1 = data.returnPctTier1 !== undefined
+        ? Number(data.returnPctTier1)
+        : (data.monthlyReturnPct !== undefined ? Number(data.monthlyReturnPct) : curTier1);
+      const newTier2 = data.returnPctTier2 !== undefined ? Number(data.returnPctTier2) : curTier2;
       const newDuration = data.durationMonths !== undefined ? Number(data.durationMonths) : project.durationMonths;
       const newDay = data.paymentDayOfMonth !== undefined ? Number(data.paymentDayOfMonth) : project.paymentDayOfMonth;
       const newStart = data.startDate !== undefined
@@ -473,13 +508,18 @@ export function DataProvider({ children }) {
 
       update.payments = recomputeUnpaidSchedule(project.payments || [], {
         principalAmount: newPrincipal,
-        monthlyReturnPct: newPct,
+        returnPctTier1: newTier1,
+        returnPctTier2: newTier2,
         durationMonths: newDuration,
         startDate: newStart,
         paymentDayOfMonth: newDay,
       });
       if (data.principalAmount !== undefined) update.principalAmount = newPrincipal;
-      if (data.monthlyReturnPct !== undefined) update.monthlyReturnPct = newPct;
+      if (data.returnPctTier1 !== undefined || data.monthlyReturnPct !== undefined) {
+        update.returnPctTier1 = newTier1;
+        update.monthlyReturnPct = newTier1;
+      }
+      if (data.returnPctTier2 !== undefined) update.returnPctTier2 = newTier2;
       if (data.durationMonths !== undefined) update.durationMonths = newDuration;
       if (data.paymentDayOfMonth !== undefined) update.paymentDayOfMonth = newDay;
       if (data.startDate !== undefined) {
@@ -709,6 +749,62 @@ export function DataProvider({ children }) {
     toast(lossAmount > 0 ? 'Project ditutup, kerugian dicatat' : 'Project ditutup (BEP)');
   }
 
+  // Close a project early as fully settled (pelunasan dipercepat).
+  // Records the settlement as income, keeps already-received payments, and
+  // DROPS every remaining unpaid scheduled payment so the future income
+  // projection disappears. The settlement becomes the new final payment.
+  async function settleProjectEarly(projectId, { accountId, amount, date } = {}) {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) throw new Error('Project tidak ditemukan');
+    const amt = Number(amount) || 0;
+    if (amt <= 0) throw new Error('Jumlah pelunasan harus lebih dari 0');
+    if (!accountId) throw new Error('Pilih rekening tujuan');
+    const settleDate = date instanceof Date ? date : new Date();
+
+    const batch = writeBatch(db);
+    const txRef = doc(collection(db, C('transactions')));
+    batch.set(txRef, {
+      type: 'income',
+      amount: amt,
+      description: `Pelunasan dipercepat project: ${project.name}`,
+      date: Timestamp.fromDate(settleDate),
+      fromAccount: null,
+      toAccount: accountId,
+      debtId: null,
+      projectId,
+      createdAt: serverTimestamp(),
+    });
+    batch.update(doc(db, C('accounts'), accountId), {
+      balance: increment(amt),
+      updatedAt: serverTimestamp(),
+    });
+
+    const keptPaid = (project.payments || []).filter((p) => p.receivedAmount != null);
+    const settleNo = keptPaid.reduce((max, p) => Math.max(max, p.no || 0), 0) + 1;
+    const settlementRow = {
+      no: settleNo,
+      dueDate: Timestamp.fromDate(settleDate),
+      type: 'final',
+      expectedAmount: amt,
+      ratePct: null,
+      receivedAmount: amt,
+      receivedDate: Timestamp.fromDate(settleDate),
+      transactionId: txRef.id,
+      accountId,
+      settledEarly: true,
+    };
+
+    batch.update(doc(db, C('projects'), projectId), {
+      payments: [...keptPaid, settlementRow],
+      status: 'completed',
+      closedAt: Timestamp.fromDate(settleDate),
+      settledEarly: true,
+    });
+
+    await batch.commit();
+    toast('Project dilunasi lebih cepat');
+  }
+
   // Full cancel/undo: reverse ALL cash effects as if the project never existed.
   // - Return the disbursed funding to the source account
   // - Claw back every received return from the account it landed in
@@ -786,7 +882,7 @@ export function DataProvider({ children }) {
     addTransaction, updateTransaction, deleteTransaction,
     addDebt, updateDebt, deleteDebt, payInstallment,
     addReminder, updateReminder, deleteReminder,
-    addProject, updateProject, recordProjectPayment, updateProjectPayment, closeProjectAsDefault, deleteProject,
+    addProject, updateProject, recordProjectPayment, updateProjectPayment, closeProjectAsDefault, settleProjectEarly, deleteProject,
     resetAllData,
   };
 

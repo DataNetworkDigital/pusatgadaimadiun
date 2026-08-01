@@ -11,7 +11,12 @@ import ExportSheet from './ExportSheet';
 import PeriodPickerSheet, { resolvePeriod } from './PeriodPickerSheet';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { projectSummary } from '../../utils/projectSchedule';
-import { exportProjectsToExcel, exportProjectsToPdf } from '../../utils/projectExport';
+import {
+  exportProjectsToExcel,
+  exportProjectsToPdf,
+  exportCollectionToExcel,
+  exportCollectionToPdf,
+} from '../../utils/projectExport';
 import { toDate, formatDate } from '../../utils/formatDate';
 import { IcPlus, IcDownload, IcChevronRight, IcSearch, IcSort, IcCheck } from '../common/icons';
 
@@ -305,6 +310,10 @@ export default function ProjectList() {
         onClose={() => setExportOpen(false)}
         onExportExcel={(filter) => exportProjectsToExcel(projects, accounts, filter)}
         onExportPdf={(mode, filter) => exportProjectsToPdf(projects, accounts, mode, filter)}
+        onExportCollection={(filter) => {
+          exportCollectionToPdf(projects, accounts, filter);
+          exportCollectionToExcel(projects, accounts, filter);
+        }}
         counts={{ active: active.length, archive: archived.length, total: projects.length }}
       />
       <PeriodPickerSheet

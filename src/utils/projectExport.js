@@ -18,6 +18,10 @@ function projectRow(p, accountName) {
   return {
     Nama: p.name,
     Pemilik: p.ownerName || '',
+    'No. HP': p.phone || '',
+    NIK: p.nik || '',
+    Alamat: p.address || '',
+    Agunan: p.collateral || '',
     'No. Kontrak': p.contractNumber || '',
     Status: STATUS_LABEL[p.status] || p.status,
     'Nilai Project': p.principalAmount,
@@ -273,6 +277,135 @@ export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = n
   const monthName = MONTHS[now.getMonth()];
   const filename = `Pusat Gadai Madiun_Project_${baseLabel.replace(/\s+/g, '_')}_${monthName}_${now.getFullYear()}.pdf`;
   doc.save(filename);
+}
+
+// ===== Daftar Tagihan (untuk penagih utang) =====
+// One row per scheduled payment whose DUE DATE falls in the range (all
+// statuses), so the collector knows who / when / where to collect.
+
+function projectEndDate(p) {
+  const dues = (p.payments || []).map((pay) => toDate(pay.dueDate)).filter(Boolean);
+  if (!dues.length) return null;
+  return new Date(Math.max(...dues.map((d) => d.getTime())));
+}
+
+function collectionRows(projects, filter) {
+  const rows = [];
+  projects.forEach((p) => {
+    const startStr = p.startDate ? formatDate(p.startDate) : '';
+    const end = projectEndDate(p);
+    const endStr = end ? formatDate(end) : '';
+    (p.payments || []).forEach((pay) => {
+      if (!pay.dueDate) return;
+      if (filter && !inDateRange(pay.dueDate, filter)) return;
+      const paid = pay.receivedAmount != null;
+      rows.push({
+        project: p.name,
+        owner: p.ownerName || '',
+        phone: p.phone || '',
+        address: p.address || '',
+        collateral: p.collateral || '',
+        periode: startStr && endStr ? `${startStr} - ${endStr}` : startStr,
+        due: toDate(pay.dueDate),
+        dueStr: formatDate(pay.dueDate),
+        jenis: pay.type === 'final' ? 'Pelunasan' : 'Cicilan',
+        amount: paid ? (pay.receivedAmount || 0) : (pay.expectedAmount || 0),
+        status: paid ? 'Lunas' : 'Belum',
+        paidStr: pay.receivedDate ? formatDate(pay.receivedDate) : '',
+      });
+    });
+  });
+  rows.sort((a, b) => (a.due?.getTime() || 0) - (b.due?.getTime() || 0));
+  return rows;
+}
+
+export function exportCollectionToExcel(projects, accounts, filter = null) {
+  const rows = collectionRows(projects, filter);
+  const wb = XLSX.utils.book_new();
+  const sheet = XLSX.utils.json_to_sheet(
+    rows.map((r) => ({
+      'Jatuh Tempo': r.dueStr,
+      Pemilik: r.owner,
+      Project: r.project,
+      'No. HP': r.phone,
+      Alamat: r.address,
+      Agunan: r.collateral,
+      'Periode Proyek': r.periode,
+      Jenis: r.jenis,
+      'Nominal Tagihan': r.amount,
+      Status: r.status,
+      'Tgl Bayar': r.paidStr,
+    }))
+  );
+  sheet['!cols'] = [
+    { wch: 14 }, { wch: 20 }, { wch: 24 }, { wch: 16 }, { wch: 32 },
+    { wch: 26 }, { wch: 24 }, { wch: 12 }, { wch: 16 }, { wch: 10 }, { wch: 14 },
+  ];
+  XLSX.utils.book_append_sheet(wb, sheet, 'Daftar Tagihan');
+  XLSX.writeFile(wb, `Pusat Gadai Madiun_Tagihan_${downloadFilenameStamp()}.xlsx`);
+}
+
+export function exportCollectionToPdf(projects, accounts, filter = null) {
+  const rows = collectionRows(projects, filter);
+  const doc = new jsPDF({ orientation: 'landscape' });
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Daftar Tagihan — Pusat Gadai Madiun', 14, 16);
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  const periodStr = filter
+    ? `${formatDate(filter.from, { short: true })} – ${formatDate(filter.to, { short: true })}`
+    : 'Semua tanggal';
+  doc.text(`Periode jatuh tempo: ${periodStr}`, 14, 22);
+  doc.text(`Dicetak: ${formatDate(new Date())}`, 14, 27);
+
+  const head = [[
+    'Jatuh Tempo', 'Pemilik', 'Project', 'No. HP', 'Alamat', 'Agunan', 'Jenis', 'Nominal', 'Status',
+  ]];
+  const body = rows.length
+    ? rows.map((r) => [
+        r.dueStr, r.owner, r.project, r.phone, r.address, r.collateral, r.jenis,
+        formatCurrency(r.amount), r.status,
+      ])
+    : [['—', 'Tidak ada tagihan pada periode ini', '', '', '', '', '', '', '']];
+
+  autoTable(doc, {
+    head,
+    body,
+    startY: 32,
+    styles: { fontSize: 8, cellPadding: 1.8, valign: 'middle' },
+    headStyles: { fillColor: [45, 74, 107], textColor: 248 },
+    columnStyles: {
+      0: { cellWidth: 24 },
+      1: { cellWidth: 36 },
+      2: { cellWidth: 40 },
+      3: { cellWidth: 26 },
+      4: { cellWidth: 55 },
+      5: { cellWidth: 44 },
+      6: { cellWidth: 20 },
+      7: { cellWidth: 26, halign: 'right' },
+      8: { cellWidth: 16 },
+    },
+    didParseCell: (data) => {
+      const r = rows[data.row.index];
+      if (data.section === 'body' && r && r.status === 'Belum') {
+        data.cell.styles.fillColor = [250, 240, 235];
+      }
+    },
+  });
+
+  const totalOutstanding = rows
+    .filter((r) => r.status === 'Belum')
+    .reduce((s, r) => s + r.amount, 0);
+  const totalAll = rows.reduce((s, r) => s + r.amount, 0);
+  const y = doc.lastAutoTable.finalY + 8;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Total belum dibayar: ${formatCurrency(totalOutstanding)}`, 14, y);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Total semua tagihan: ${formatCurrency(totalAll)}`, 14, y + 6);
+
+  doc.save(`Pusat Gadai Madiun_Tagihan_${downloadFilenameStamp()}.pdf`);
 }
 
 // no-op import to silence unused warning if MONTHS unused in some bundles
