@@ -289,12 +289,26 @@ function projectEndDate(p) {
   return new Date(Math.max(...dues.map((d) => d.getTime())));
 }
 
+// Contractual project end = start + durationMonths (on the payment day). Stays
+// correct even if the project was settled early (which truncates payments).
+function projectEndFromDuration(p) {
+  const start = toDate(p.startDate);
+  const dur = Number(p.durationMonths) || 0;
+  if (!start || !dur) return projectEndDate(p);
+  const day = Number(p.paymentDayOfMonth) || start.getDate();
+  const anchor = new Date(start.getFullYear(), start.getMonth() + dur, 1);
+  const lastDay = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate();
+  anchor.setDate(Math.min(day, lastDay));
+  return anchor;
+}
+
 function collectionRows(projects, filter) {
   const rows = [];
   projects.forEach((p) => {
     const startStr = p.startDate ? formatDate(p.startDate) : '';
-    const end = projectEndDate(p);
+    const end = projectEndFromDuration(p);
     const endStr = end ? formatDate(end) : '';
+    const durasi = Number(p.durationMonths) || 0;
     (p.payments || []).forEach((pay) => {
       if (!pay.dueDate) return;
       if (filter && !inDateRange(pay.dueDate, filter)) return;
@@ -305,7 +319,10 @@ function collectionRows(projects, filter) {
         phone: p.phone || '',
         address: p.address || '',
         collateral: p.collateral || '',
-        periode: startStr && endStr ? `${startStr} - ${endStr}` : startStr,
+        startStr,
+        durasi,
+        durasiStr: durasi ? `${durasi} bln` : '',
+        endStr,
         due: toDate(pay.dueDate),
         dueStr: formatDate(pay.dueDate),
         jenis: pay.type === 'final' ? 'Pelunasan' : 'Cicilan',
@@ -330,7 +347,9 @@ export function exportCollectionToExcel(projects, accounts, filter = null) {
       'No. HP': r.phone,
       Alamat: r.address,
       Agunan: r.collateral,
-      'Periode Proyek': r.periode,
+      'Mulai Proyek': r.startStr,
+      'Durasi (bln)': r.durasi,
+      'Berakhir Proyek': r.endStr,
       Jenis: r.jenis,
       'Nominal Tagihan': r.amount,
       Status: r.status,
@@ -339,7 +358,7 @@ export function exportCollectionToExcel(projects, accounts, filter = null) {
   );
   sheet['!cols'] = [
     { wch: 14 }, { wch: 20 }, { wch: 24 }, { wch: 16 }, { wch: 32 },
-    { wch: 26 }, { wch: 24 }, { wch: 12 }, { wch: 16 }, { wch: 10 }, { wch: 14 },
+    { wch: 26 }, { wch: 14 }, { wch: 11 }, { wch: 15 }, { wch: 12 }, { wch: 16 }, { wch: 10 }, { wch: 14 },
   ];
   XLSX.utils.book_append_sheet(wb, sheet, 'Daftar Tagihan');
   XLSX.writeFile(wb, `Pusat Gadai Madiun_Tagihan_${downloadFilenameStamp()}.xlsx`);
@@ -360,33 +379,37 @@ export function exportCollectionToPdf(projects, accounts, filter = null) {
   doc.text(`Dicetak: ${formatDate(new Date())}`, 14, 27);
 
   const head = [[
-    'Jatuh Tempo', 'Pemilik', 'Project', 'No. HP', 'Alamat', 'Agunan', 'Jenis', 'Nominal', 'Status',
+    'Jatuh Tempo', 'Pemilik', 'Project', 'No. HP', 'Alamat', 'Agunan',
+    'Mulai', 'Durasi', 'Berakhir', 'Jenis', 'Nominal', 'Status',
   ]];
   const body = rows.length
     ? rows.map((r) => [
-        r.dueStr, r.owner, r.project, r.phone, r.address, r.collateral, r.jenis,
-        formatCurrency(r.amount), r.status,
+        r.dueStr, r.owner, r.project, r.phone, r.address, r.collateral,
+        r.startStr, r.durasiStr, r.endStr, r.jenis, formatCurrency(r.amount), r.status,
       ])
-    : [['—', 'Tidak ada tagihan pada periode ini', '', '', '', '', '', '', '']];
+    : [['—', 'Tidak ada tagihan pada periode ini', '', '', '', '', '', '', '', '', '', '']];
 
   autoTable(doc, {
     head,
     body,
     startY: 32,
-    margin: { left: 10, right: 10 },
+    margin: { left: 6, right: 6 },
     tableWidth: 'wrap',
-    styles: { fontSize: 8, cellPadding: 1.8, valign: 'middle', overflow: 'linebreak' },
+    styles: { fontSize: 7, cellPadding: 1.3, valign: 'middle', overflow: 'linebreak' },
     headStyles: { fillColor: [45, 74, 107], textColor: 248 },
     columnStyles: {
-      0: { cellWidth: 22 },
-      1: { cellWidth: 34 },
-      2: { cellWidth: 36 },
-      3: { cellWidth: 24 },
-      4: { cellWidth: 48 },
-      5: { cellWidth: 38 },
-      6: { cellWidth: 18 },
-      7: { cellWidth: 24, halign: 'right' },
-      8: { cellWidth: 14 },
+      0: { cellWidth: 17 },
+      1: { cellWidth: 24 },
+      2: { cellWidth: 22 },
+      3: { cellWidth: 19 },
+      4: { cellWidth: 30 },
+      5: { cellWidth: 24 },
+      6: { cellWidth: 17 },
+      7: { cellWidth: 12 },
+      8: { cellWidth: 17 },
+      9: { cellWidth: 14 },
+      10: { cellWidth: 21, halign: 'right' },
+      11: { cellWidth: 12 },
     },
     didParseCell: (data) => {
       const r = rows[data.row.index];
