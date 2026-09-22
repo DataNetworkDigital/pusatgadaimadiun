@@ -1,4 +1,5 @@
 import { Timestamp } from 'firebase/firestore';
+import { toDate } from './formatDate';
 
 const ONE_RUPIAH = 1;
 
@@ -181,3 +182,24 @@ export function findNextDuePayment(project, today = new Date()) {
 }
 
 export const ONE_RUPIAH_GUARD = ONE_RUPIAH;
+
+// Last due date actually on the schedule. Moved here from projectExport.js so
+// export code and the column registry can share it without importing each other.
+export function projectEndDate(p) {
+  const dues = (p.payments || []).map((pay) => toDate(pay.dueDate)).filter(Boolean);
+  if (!dues.length) return null;
+  return new Date(Math.max(...dues.map((d) => d.getTime())));
+}
+
+// Contractual project end = start + durationMonths (on the payment day). Stays
+// correct even if the project was settled early (which truncates payments).
+export function projectEndFromDuration(p) {
+  const start = toDate(p.startDate);
+  const dur = Number(p.durationMonths) || 0;
+  if (!start || !dur) return projectEndDate(p);
+  const day = Number(p.paymentDayOfMonth) || start.getDate();
+  const anchor = new Date(start.getFullYear(), start.getMonth() + dur, 1);
+  const lastDay = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate();
+  anchor.setDate(Math.min(day, lastDay));
+  return anchor;
+}

@@ -3,7 +3,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatCurrency } from './formatCurrency';
 import { formatDate, MONTHS, toDate } from './formatDate';
-import { projectSummary } from './projectSchedule';
+import { projectSummary, projectEndFromDuration } from './projectSchedule';
 
 const STATUS_LABEL = {
   active: 'Aktif',
@@ -282,25 +282,6 @@ export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = n
 // ===== Daftar Tagihan (untuk penagih utang) =====
 // One row per scheduled payment whose DUE DATE falls in the range (all
 // statuses), so the collector knows who / when / where to collect.
-
-function projectEndDate(p) {
-  const dues = (p.payments || []).map((pay) => toDate(pay.dueDate)).filter(Boolean);
-  if (!dues.length) return null;
-  return new Date(Math.max(...dues.map((d) => d.getTime())));
-}
-
-// Contractual project end = start + durationMonths (on the payment day). Stays
-// correct even if the project was settled early (which truncates payments).
-function projectEndFromDuration(p) {
-  const start = toDate(p.startDate);
-  const dur = Number(p.durationMonths) || 0;
-  if (!start || !dur) return projectEndDate(p);
-  const day = Number(p.paymentDayOfMonth) || start.getDate();
-  const anchor = new Date(start.getFullYear(), start.getMonth() + dur, 1);
-  const lastDay = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate();
-  anchor.setDate(Math.min(day, lastDay));
-  return anchor;
-}
 
 function collectionRows(projects, filter) {
   const rows = [];
