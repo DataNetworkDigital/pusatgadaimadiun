@@ -63,7 +63,7 @@ Three parts, three implementation plans, executed in order. Each part is built o
 - `ExportSheet` gets a "Pilih kolom" step after the user picks Excel, PDF, or Daftar Tagihan. Selection is stored in `localStorage` per export type (wrapped in try/catch; falls back to defaults).
 - PDF uses the selected columns, switches to landscape when the selected widths exceed portrait width, and stretches one flexible column (Nama/Alamat) to fill the page, as Daftar Tagihan does now.
 - `Bagi hasil %` shows both tiers, e.g. `5,5% / 6,5%`; legacy flat-rate projects show one value.
-- Dates use the existing `formatDate`. "Tanggal Berakhir" = due date of the last schedule row; "Jatuh Tempo Berikutnya" = earliest open row.
+- Dates use the existing `formatDate`. "Tanggal Berakhir" = contractual end (start + durasi on the payment day), reusing the helper Daftar Tagihan already uses, falling back to the last schedule row when duration is missing; "Jatuh Tempo Berikutnya" = earliest open row.
 - Excel's project sheet uses the same selection. Its payment-schedule sheet is unchanged in Part A.
 
 ## 6. Part B — Payment model
