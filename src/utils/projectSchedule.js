@@ -1,5 +1,6 @@
 import { Timestamp } from 'firebase/firestore';
 import { toDate } from './formatDate';
+import { isSettled, rowRemaining, projectReceivedTotal } from './paymentStatus';
 
 const ONE_RUPIAH = 1;
 
@@ -69,7 +70,9 @@ export function recomputeUnpaidSchedule(existingPayments, {
   const months = Number(durationMonths) || 1;
   const paidByNo = new Map();
   for (const p of existingPayments || []) {
-    if (p.receivedAmount != null) paidByNo.set(p.no, p);
+    // A row is kept when money reached it or a closure settled it; regenerating
+    // such a row would throw away the record of what actually happened.
+    if (p.receivedAmount != null || p.closure) paidByNo.set(p.no, p);
   }
 
   const payments = [];
@@ -147,11 +150,9 @@ export function projectSummary(project) {
     if (p.type === 'final') return s + (p.expectedAmount - (project.principalAmount || 0));
     return s;
   }, 0);
-  const receivedSoFar = payments.reduce((s, p) => s + (p.receivedAmount || 0), 0);
-  const expectedRemaining = payments
-    .filter((p) => p.receivedAmount == null)
-    .reduce((s, p) => s + p.expectedAmount, 0);
-  const paidCount = payments.filter((p) => p.receivedAmount != null).length;
+  const receivedSoFar = projectReceivedTotal(project);
+  const expectedRemaining = payments.reduce((s, p) => s + rowRemaining(project, p), 0);
+  const paidCount = payments.filter((p) => isSettled(project, p)).length;
   const allPaid = paidCount === payments.length && payments.length > 0;
 
   // Profit so far = receivedSoFar - principal contribution recovered
@@ -175,7 +176,7 @@ export function findNextDuePayment(project, today = new Date()) {
   const payments = project.payments || [];
   return (
     payments
-      .filter((p) => p.receivedAmount == null)
+      .filter((p) => !isSettled(project, p))
       .map((p) => ({ ...p, dueDate: p.dueDate?.toDate ? p.dueDate.toDate() : new Date(p.dueDate) }))
       .sort((a, b) => a.dueDate - b.dueDate)[0] || null
   );
