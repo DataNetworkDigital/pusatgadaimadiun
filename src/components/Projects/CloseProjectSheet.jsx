@@ -107,6 +107,7 @@ export default function CloseProjectSheet({ open, onClose, project, accounts, on
               required
             >
               <option value="">Pilih rekening</option>
+              <option value="cash">Tunai (Kas)</option>
               {accounts?.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name} ({formatCurrency(a.balance)})

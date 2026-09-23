@@ -124,6 +124,7 @@ export default function SettleProjectSheet({ open, onClose, project, accounts, o
             required
           >
             <option value="">Pilih rekening</option>
+            <option value="cash">Tunai (Kas)</option>
             {accounts?.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name} ({formatCurrency(a.balance)})

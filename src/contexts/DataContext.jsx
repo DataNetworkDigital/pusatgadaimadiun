@@ -588,6 +588,38 @@ export function DataProvider({ children }) {
     toast('Project tersimpan');
   }
 
+  // Resolves where money that just came in should land, and credits it.
+  // `account` is either an account id or the string 'cash'. Cash uses the Kas
+  // account when the owner has one and creates it otherwise, so cash on hand
+  // still counts in the dashboard total instead of vanishing.
+  function creditMoneyIn(batch, account, amount) {
+    if (account !== 'cash') {
+      batch.update(doc(db, C('accounts'), account), {
+        balance: increment(amount),
+        updatedAt: serverTimestamp(),
+      });
+      return account;
+    }
+    const existing = findCashAccount(accounts);
+    if (existing) {
+      batch.update(doc(db, C('accounts'), existing.id), {
+        balance: increment(amount),
+        updatedAt: serverTimestamp(),
+      });
+      return existing.id;
+    }
+    const accRef = doc(collection(db, C('accounts')));
+    batch.set(accRef, {
+      name: CASH_ACCOUNT_NAME,
+      accountNumber: '',
+      kind: 'cash',
+      balance: amount,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return accRef.id;
+  }
+
   // One arrival of money: allocated across the tagihan it covers, oldest first,
   // and stored as a receipt that carries its own transaction.
   async function recordReceipt(projectId, { amount, date, account, startNo = null }) {
@@ -608,35 +640,7 @@ export function DataProvider({ children }) {
     const recvDate = date instanceof Date ? date : new Date();
     const batch = writeBatch(db);
 
-    // 'cash' means Tunai. Use the Kas account when the owner has one, otherwise
-    // create it here, so cash on hand still counts in the dashboard total.
-    let accountId = account;
-    if (account === 'cash') {
-      const existing = findCashAccount(accounts);
-      if (existing) {
-        accountId = existing.id;
-        batch.update(doc(db, C('accounts'), accountId), {
-          balance: increment(amt),
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        const accRef = doc(collection(db, C('accounts')));
-        accountId = accRef.id;
-        batch.set(accRef, {
-          name: CASH_ACCOUNT_NAME,
-          accountNumber: '',
-          kind: 'cash',
-          balance: amt,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      }
-    } else {
-      batch.update(doc(db, C('accounts'), accountId), {
-        balance: increment(amt),
-        updatedAt: serverTimestamp(),
-      });
-    }
+    const accountId = creditMoneyIn(batch, account, amt);
 
     const txRef = doc(collection(db, C('transactions')));
     const months = allocations.map((a) => a.no).join(', ');
@@ -815,6 +819,7 @@ export function DataProvider({ children }) {
     let recoveryTxId = null;
     if (recv > 0) {
       if (!accountId) throw new Error('Pilih rekening tujuan untuk pengembalian');
+      const creditedTo = creditMoneyIn(batch, accountId, recv);
       const txRef = doc(collection(db, C('transactions')));
       recoveryTxId = txRef.id;
       batch.set(txRef, {
@@ -823,14 +828,10 @@ export function DataProvider({ children }) {
         description: `Pengembalian sisa project: ${project.name}`,
         date: Timestamp.fromDate(closeDate),
         fromAccount: null,
-        toAccount: accountId,
+        toAccount: creditedTo,
         debtId: null,
         projectId,
         createdAt: serverTimestamp(),
-      });
-      batch.update(doc(db, C('accounts'), accountId), {
-        balance: increment(recv),
-        updatedAt: serverTimestamp(),
       });
     }
 
@@ -862,6 +863,7 @@ export function DataProvider({ children }) {
     const settleDate = date instanceof Date ? date : new Date();
 
     const batch = writeBatch(db);
+    const creditedTo = creditMoneyIn(batch, accountId, amt);
     const txRef = doc(collection(db, C('transactions')));
     batch.set(txRef, {
       type: 'income',
@@ -869,14 +871,10 @@ export function DataProvider({ children }) {
       description: `Pelunasan dipercepat project: ${project.name}`,
       date: Timestamp.fromDate(settleDate),
       fromAccount: null,
-      toAccount: accountId,
+      toAccount: creditedTo,
       debtId: null,
       projectId,
       createdAt: serverTimestamp(),
-    });
-    batch.update(doc(db, C('accounts'), accountId), {
-      balance: increment(amt),
-      updatedAt: serverTimestamp(),
     });
 
     const keptPaid = (project.payments || []).filter((p) => p.receivedAmount != null || isSettled(project, p));
@@ -890,7 +888,7 @@ export function DataProvider({ children }) {
       receivedAmount: amt,
       receivedDate: Timestamp.fromDate(settleDate),
       transactionId: txRef.id,
-      accountId,
+      accountId: creditedTo,
       settledEarly: true,
     };
 
