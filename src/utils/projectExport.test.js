@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PROJECT_COLUMNS, defaultKeys, pickColumns } from './exportColumns';
+import { PROJECT_COLUMNS, COLLECTION_COLUMNS, defaultKeys, pickColumns, pdfLayout } from './exportColumns';
 import { formatCurrency } from './formatCurrency';
 import { projectSheetRows, projectsToPdfRows, emptyPdfRow } from './projectExport';
 
@@ -140,5 +140,21 @@ describe('emptyPdfRow', () => {
     expect(row[0]).toBe('—');
     expect(row[1]).toBe('Tidak ada project aktif');
     row.slice(2).forEach((cell) => expect(cell).toBe(''));
+  });
+});
+
+// exportCollectionToPdf creates its jsPDF document with whatever orientation
+// pdfLayout picks for the selected columns (it no longer hardcodes
+// 'landscape'), so this is the regression guard: it locks in which selections
+// must render landscape vs portrait, without needing to touch jsPDF at all.
+describe('Daftar Tagihan PDF orientation (drives exportCollectionToPdf\'s document orientation)', () => {
+  it('stays landscape for the default (all 13) column selection - what the debt collector receives today', () => {
+    const picked = pickColumns(COLLECTION_COLUMNS, defaultKeys(COLLECTION_COLUMNS));
+    expect(pdfLayout(picked).orientation).toBe('landscape');
+  });
+
+  it('switches to portrait for a narrow selection, so the columns fill the page width instead of leaving a gutter', () => {
+    const picked = pickColumns(COLLECTION_COLUMNS, ['due', 'owner', 'project', 'phone', 'address']);
+    expect(pdfLayout(picked).orientation).toBe('portrait');
   });
 });

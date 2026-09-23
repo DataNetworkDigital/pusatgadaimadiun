@@ -250,20 +250,22 @@ export function exportCollectionToExcel(projects, accounts, filter = null, colum
 
 export function exportCollectionToPdf(projects, accounts, filter = null, columnKeys = null) {
   const rows = collectionRows(projects, filter);
-  const doc = new jsPDF({ orientation: 'landscape' });
+  const picked = pickColumns(COLLECTION_COLUMNS, columnKeys);
+  const { orientation, columnStyles } = pdfLayout(picked);
+  const doc = new jsPDF({ orientation });
+  const margin = orientation === 'landscape' ? { left: 6, right: 6 } : { left: 14, right: 14 };
+
   doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
-  doc.text('Daftar Tagihan — Pusat Gadai Madiun', 14, 16);
+  doc.text('Daftar Tagihan — Pusat Gadai Madiun', margin.left, 16);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   const periodStr = filter
     ? `${formatDate(filter.from, { short: true })} – ${formatDate(filter.to, { short: true })}`
     : 'Semua tanggal';
-  doc.text(`Periode jatuh tempo: ${periodStr}`, 14, 22);
-  doc.text(`Dicetak: ${formatDate(new Date())}`, 14, 27);
+  doc.text(`Periode jatuh tempo: ${periodStr}`, margin.left, 22);
+  doc.text(`Dicetak: ${formatDate(new Date())}`, margin.left, 27);
 
-  const picked = pickColumns(COLLECTION_COLUMNS, columnKeys);
-  const { columnStyles } = pdfLayout(picked);
   const head = [picked.map((c) => c.label)];
   const body = rows.length
     ? rows.map((r) => picked.map((c) => cellText(c, r, {})))
@@ -273,7 +275,7 @@ export function exportCollectionToPdf(projects, accounts, filter = null, columnK
     head,
     body,
     startY: 32,
-    margin: { left: 6, right: 6 },
+    margin,
     styles: { fontSize: 8, cellPadding: 2, valign: 'middle', overflow: 'linebreak' },
     headStyles: { fillColor: [45, 74, 107], textColor: 248 },
     columnStyles,
@@ -292,9 +294,9 @@ export function exportCollectionToPdf(projects, accounts, filter = null, columnK
   const y = doc.lastAutoTable.finalY + 8;
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Total belum dibayar: ${formatCurrency(totalOutstanding)}`, 14, y);
+  doc.text(`Total belum dibayar: ${formatCurrency(totalOutstanding)}`, margin.left, y);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Total semua tagihan: ${formatCurrency(totalAll)}`, 14, y + 6);
+  doc.text(`Total semua tagihan: ${formatCurrency(totalAll)}`, margin.left, y + 6);
 
   doc.save(`Pusat Gadai Madiun_Tagihan_${downloadFilenameStamp()}.pdf`);
 }
