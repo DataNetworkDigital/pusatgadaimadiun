@@ -133,6 +133,12 @@ describe('applyPaymentEdit: tagihan paid under the new rules', () => {
     expect(() => edit(p, 1, 5_000_000)).toThrow(/beberapa kali bayar/);
   });
 
+  it('refuses a row with money but no receipt behind it, rather than half-editing it', () => {
+    const p = project({ paidRows: [{ no: 1, amount: 5_500_000 }] });
+    p.receipts = [];
+    expect(() => edit(p, 1, 5_000_000)).toThrow(/belum tercatat lengkap/);
+  });
+
   it('refuses one arrival that also paid another tagihan', () => {
     const p = project({
       paidRows: [{ no: 1, amount: 7_000_000, allocations: [{ no: 1, amount: 5_500_000 }, { no: 2, amount: 1_500_000 }] }],

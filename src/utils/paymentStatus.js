@@ -124,22 +124,25 @@ export function projectReceivedTotal(project) {
   return (project?.payments || []).reduce((s, p) => s + (Number(p?.receivedAmount) || 0), 0);
 }
 
-// Money that arrived inside a period, counted per arrival on the day it
-// arrived. A tagihan paid in two instalments in two months belongs partly to
-// each; reading the row's last payment date instead would move the first
+// The arrivals of money that landed inside a period, judged by the day each
+// one arrived. A tagihan paid in two instalments in two months belongs partly
+// to each; reading the row's last payment date instead would move the first
 // instalment into the later month after the fact.
 // `inRange` receives the arrival's date as a Date.
-export function receivedWithin(project, inRange) {
+export function receiptsWithin(project, inRange) {
   const receipts = receiptsOf(project) || normalizeProject(project)?.receipts || [];
-  let amount = 0;
-  let count = 0;
-  for (const r of receipts) {
+  return receipts.filter((r) => {
     const d = toDate(r?.date);
-    if (!d || !inRange(d)) continue;
-    amount += Number(r?.amount) || 0;
-    count += 1;
-  }
-  return { amount, count };
+    return !!d && inRange(d);
+  });
+}
+
+export function receivedWithin(project, inRange) {
+  const list = receiptsWithin(project, inRange);
+  return {
+    amount: list.reduce((s, r) => s + (Number(r?.amount) || 0), 0),
+    count: list.length,
+  };
 }
 
 export function hasAnyReceipt(project) {

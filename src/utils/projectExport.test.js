@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { PROJECT_COLUMNS, COLLECTION_COLUMNS, defaultKeys, pickColumns, pdfLayout } from './exportColumns';
 import { formatCurrency } from './formatCurrency';
-import { projectSheetRows, projectsToPdfRows, emptyPdfRow } from './projectExport';
+import {
+  projectSheetRows, projectsToPdfRows, emptyPdfRow, projectsTouchedByFilter, scheduleSheetRows,
+} from './projectExport';
 
 // Two projects: one active with every relevant field present, one completed
 // with a missing ownerName and a missing paymentDayOfMonth — the two "holes"
@@ -156,5 +158,56 @@ describe('Daftar Tagihan PDF orientation (drives exportCollectionToPdf\'s docume
   it('switches to portrait for a narrow selection, so the columns fill the page width instead of leaving a gutter', () => {
     const picked = pickColumns(COLLECTION_COLUMNS, ['due', 'owner', 'project', 'phone', 'address']);
     expect(pdfLayout(picked).orientation).toBe('portrait');
+  });
+});
+
+// The spec's own example: bulan 3 paid 3jt on 5 Okt and 1jt on 6 Okt, then
+// 7jt on 5 Nov finishes bulan 3 (1,5jt) and pays bulan 4 (5,5jt). A period
+// export must follow the money, not the tagihan's last payment date.
+describe('period-filtered exports follow each arrival', () => {
+  const r3 = { no: 3, type: 'interest', expectedAmount: 5_500_000, dueDate: new Date(2026, 9, 5), receivedAmount: 5_500_000, receivedDate: new Date(2026, 10, 5), accountId: 'bca' };
+  const r4 = { no: 4, type: 'interest', expectedAmount: 5_500_000, dueDate: new Date(2026, 10, 5), receivedAmount: 5_500_000, receivedDate: new Date(2026, 10, 5), accountId: 'bca' };
+  const project = {
+    id: 'p1', name: 'Toko', ownerName: 'Budi', status: 'active',
+    payments: [r3, r4],
+    receipts: [
+      { id: 'a', amount: 3_000_000, date: new Date(2026, 9, 5), accountId: 'bca', allocations: [{ no: 3, amount: 3_000_000 }] },
+      { id: 'b', amount: 1_000_000, date: new Date(2026, 9, 6), accountId: 'bri', allocations: [{ no: 3, amount: 1_000_000 }] },
+      { id: 'c', amount: 7_000_000, date: new Date(2026, 10, 5), accountId: 'bca', allocations: [{ no: 3, amount: 1_500_000 }, { no: 4, amount: 5_500_000 }] },
+    ],
+  };
+  const october = { from: new Date(2026, 9, 1), to: new Date(2026, 9, 31) };
+  const november = { from: new Date(2026, 10, 1), to: new Date(2026, 10, 30) };
+  const accountName = (id) => ({ bca: 'BCA', bri: 'BRI' })[id] || '';
+  const total = (rows) => rows.reduce((sum, r) => sum + (Number(r['Diterima (Rp)']) || 0), 0);
+
+  it('includes a project in the month money arrived for it', () => {
+    expect(projectsTouchedByFilter([project], october)).toHaveLength(1);
+    expect(projectsTouchedByFilter([project], november)).toHaveLength(1);
+    expect(projectsTouchedByFilter([project], { from: new Date(2026, 11, 1), to: new Date(2026, 11, 31) })).toHaveLength(0);
+  });
+
+  it('lists each arrival in its own month on the Jadwal sheet', () => {
+    const oct = scheduleSheetRows([project], accountName, october);
+    expect(oct.map((r) => [r['No. Pembayaran'], r['Diterima (Rp)'], r['Rekening Tujuan']])).toEqual([
+      [3, 3_000_000, 'BCA'],
+      [3, 1_000_000, 'BRI'],
+    ]);
+    expect(total(oct)).toBe(4_000_000);
+
+    const nov = scheduleSheetRows([project], accountName, november);
+    expect(nov.map((r) => [r['No. Pembayaran'], r['Diterima (Rp)']])).toEqual([
+      [3, 1_500_000],
+      [4, 5_500_000],
+    ]);
+    expect(total(nov)).toBe(7_000_000);
+  });
+
+  it('keeps one line per tagihan when there is no period', () => {
+    const all = scheduleSheetRows([project], accountName, null);
+    expect(all.map((r) => [r['No. Pembayaran'], r['Diterima (Rp)']])).toEqual([
+      [3, 5_500_000],
+      [4, 5_500_000],
+    ]);
   });
 });

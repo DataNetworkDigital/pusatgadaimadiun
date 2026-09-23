@@ -179,6 +179,34 @@ describe('settlementSuggestion', () => {
     expect(s.amount).toBe(60_000_000);
   });
 
+  it('asks only for what is still due once the pelunasan has been received in full', () => {
+    // Completed by payments, then bagi hasil 2 corrected down to 5jt, which
+    // reopened the project 500rb short. The principal is already back.
+    const p = paid(base(), [
+      { no: 1, amount: 5_500_000 },
+      { no: 2, amount: 5_000_000 },
+      { no: 3, amount: 5_500_000 },
+      { no: 4, amount: 100_000_000 },
+    ]);
+    const s = settlementSuggestion(p, today);
+    expect(s.pelunasanDone).toBe(true);
+    expect(s.principalPaid).toBe(100_000_000);
+    expect(s.dueLeft).toBe(500_000);
+    expect(s.amount).toBe(500_000);
+  });
+
+  it('suggests nothing for tagihan not due yet once the pelunasan is in', () => {
+    const early = new Date(2026, 7, 20); // bulan 3 not due until 5 Sep
+    const p = paid(base(), [
+      { no: 1, amount: 5_500_000 },
+      { no: 2, amount: 5_500_000 },
+      { no: 4, amount: 100_000_000 },
+    ]);
+    const s = settlementSuggestion(p, early);
+    expect(s.pelunasanDone).toBe(true);
+    expect(s.amount).toBe(0);
+  });
+
   it('counts the later tagihan the pelunasan will remove', () => {
     const untouched = paid(base(), [{ no: 1, amount: 5_500_000 }, { no: 2, amount: 5_500_000 }]);
     expect(settlementSuggestion(untouched, today).laterDropped).toBe(1);

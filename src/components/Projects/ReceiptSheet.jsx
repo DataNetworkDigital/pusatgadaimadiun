@@ -66,6 +66,11 @@ function ReceiptForm({ onClose, project, accounts, defaultNo, onSubmit }) {
     e.preventDefault();
     setError('');
     if (!amount || amount <= 0) return setError('Jumlah harus lebih dari 0');
+    // Another device may have paid the chosen tagihan while this sheet was
+    // open; say so instead of reporting the whole amount as too much.
+    if (startNo && !rows.some((r) => String(r.no) === startNo)) {
+      return setError(`Tagihan bulan ${startNo} sudah lunas. Pilih tagihan lain.`);
+    }
     if (preview.leftover > 0) {
       return setError(`Jumlah melebihi sisa tagihan sebesar ${formatCurrency(preview.leftover)}`);
     }

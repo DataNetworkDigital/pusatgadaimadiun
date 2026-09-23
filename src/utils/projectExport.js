@@ -4,7 +4,7 @@ import autoTable from 'jspdf-autotable';
 import { formatCurrency } from './formatCurrency';
 import { formatDate, MONTHS, toDate } from './formatDate';
 import { projectSummary, projectEndFromDuration } from './projectSchedule';
-import { isSettled, isShort, receivedWithin, rowRemaining, rowReceived } from './paymentStatus';
+import { isSettled, isShort, receiptsWithin, receivedWithin, rowRemaining, rowReceived } from './paymentStatus';
 import { PROJECT_COLUMNS, COLLECTION_COLUMNS, pickColumns, cellValue, cellText, pdfLayout } from './exportColumns';
 
 export function projectSheetRows(list, picked, accountName) {
@@ -28,7 +28,12 @@ function paymentStatusLabel(p, pay, paidLabel) {
   return 'Belum';
 }
 
-function paymentRow(p, payment, accountName) {
+// `arrival`, when given, is one arrival of money in a period: the line then
+// shows what that arrival brought to this tagihan, when, and where to.
+function paymentRow(p, payment, accountName, arrival = null) {
+  const received = arrival ? arrival.amount : rowReceived(p, payment);
+  const receivedDate = arrival ? arrival.date : payment.receivedDate;
+  const accountId = arrival ? arrival.accountId : payment.accountId;
   return {
     Project: p.name,
     'Pemilik Project': p.ownerName || '',
@@ -41,9 +46,9 @@ function paymentRow(p, payment, accountName) {
     // rowReceived has no way to tell "received exactly 0" from "received
     // nothing" apart, so this comparison and `|| ''` would blank the same
     // rows.
-    'Diterima (Rp)': rowReceived(p, payment) > 0 ? rowReceived(p, payment) : '',
-    'Tanggal Diterima': payment.receivedDate ? formatDate(payment.receivedDate) : '',
-    'Rekening Tujuan': accountName(payment.accountId),
+    'Diterima (Rp)': received > 0 ? received : '',
+    'Tanggal Diterima': receivedDate ? formatDate(receivedDate) : '',
+    'Rekening Tujuan': accountName(accountId),
     Status: paymentStatusLabel(p, payment, 'Diterima'),
   };
 }
@@ -66,13 +71,33 @@ function inDateRange(date, filter) {
   return d >= from && d <= to;
 }
 
-function projectsTouchedByFilter(projects, filter) {
+// A project belongs to a period when money for it arrived in that period,
+// judged per arrival rather than by a tagihan's latest payment date.
+export function projectsTouchedByFilter(projects, filter) {
   if (!filter) return projects;
-  return projects.filter((p) =>
-    (p.payments || []).some(
-      (pay) => pay.receivedDate && inDateRange(pay.receivedDate, filter)
-    )
-  );
+  return projects.filter((p) => receiptsWithin(p, (d) => inDateRange(d, filter)).length > 0);
+}
+
+// Sheet: Jadwal Pembayaran. Not column-picked: it is a fixed per-payment view.
+// Without a period, one line per tagihan. With one, one line per arrival in
+// that period, split by the tagihan it paid, so the sheet adds up to the same
+// Total Diterima as the PDF of the same period.
+export function scheduleSheetRows(list, accountName, filter) {
+  const rows = [];
+  list.forEach((p) => {
+    if (!filter) {
+      (p.payments || []).forEach((pay) => rows.push(paymentRow(p, pay, accountName)));
+      return;
+    }
+    receiptsWithin(p, (d) => inDateRange(d, filter)).forEach((r) => {
+      (r.allocations || []).forEach((a) => {
+        const pay = (p.payments || []).find((row) => row.no === a.no);
+        if (!pay) return;
+        rows.push(paymentRow(p, pay, accountName, { amount: Number(a.amount) || 0, date: r.date, accountId: r.accountId }));
+      });
+    });
+  });
+  return rows;
 }
 
 function buildPeriodLabel(filter) {
@@ -99,16 +124,7 @@ export function exportProjectsToExcel(projects, accounts, filter = null, columnK
   sheetArchive['!cols'] = widths;
   XLSX.utils.book_append_sheet(wb, sheetArchive, 'Riwayat');
 
-  // Sheet: Jadwal Pembayaran (filtered by receivedDate when filter set).
-  // Not column-picked: it is a fixed per-payment view.
-  const allPayments = [];
-  sourceList.forEach((p) => {
-    (p.payments || []).forEach((pay) => {
-      if (filter && !(pay.receivedDate && inDateRange(pay.receivedDate, filter))) return;
-      allPayments.push(paymentRow(p, pay, accountName));
-    });
-  });
-  const sheetPayments = XLSX.utils.json_to_sheet(allPayments);
+  const sheetPayments = XLSX.utils.json_to_sheet(scheduleSheetRows(sourceList, accountName, filter));
   sheetPayments['!cols'] = [
     { wch: 30 }, { wch: 20 }, { wch: 8 }, { wch: 16 },
     { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },

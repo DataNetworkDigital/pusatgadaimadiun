@@ -72,18 +72,37 @@ export default function SettleProjectSheet({ open, onClose, project, accounts, o
     >
       <form id="settle-form" onSubmit={handleSubmit} className="space-y-4">
         <div className="bg-cream-deep rounded-xl p-3 text-[13px] text-ink-soft space-y-1">
-          <div className="flex justify-between">
-            <span>Modal keluar</span>
-            <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {formatCurrency(suggestion.disbursed)}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span>{suggestion.currentPaid > 0 ? 'Sisa bunga bulan ini' : 'Bunga bulan ini'}</span>
-            <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {formatCurrency(suggestion.currentInterest)}
-            </span>
-          </div>
+          {suggestion.pelunasanDone ? (
+            <>
+              <div className="flex justify-between">
+                <span>Pelunasan sudah diterima</span>
+                <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {formatCurrency(suggestion.principalPaid)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>Sisa tagihan jatuh tempo</span>
+                <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {formatCurrency(suggestion.dueLeft)}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex justify-between">
+                <span>Modal keluar</span>
+                <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {formatCurrency(suggestion.disbursed)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>{suggestion.currentPaid > 0 ? 'Sisa bunga bulan ini' : 'Bunga bulan ini'}</span>
+                <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {formatCurrency(suggestion.currentInterest)}
+                </span>
+              </div>
+            </>
+          )}
           {suggestion.shortfall > 0 && (
             <div className="flex justify-between">
               <span>Kurang bayar bulan lain</span>
@@ -92,7 +111,7 @@ export default function SettleProjectSheet({ open, onClose, project, accounts, o
               </span>
             </div>
           )}
-          {suggestion.principalPaid > 0 && (
+          {!suggestion.pelunasanDone && suggestion.principalPaid > 0 && (
             <div className="flex justify-between">
               <span>Pelunasan yang sudah masuk</span>
               <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>

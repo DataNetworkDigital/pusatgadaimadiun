@@ -37,16 +37,22 @@ export function applyPaymentEdit(project, no, { amount, at, accountId }) {
     );
   }
   const target = rowReceipts[0] || null;
+  // Money on the row but no receipt for it only happens to a damaged
+  // document. Editing it would move the balance and the transaction while
+  // the receipts, which the screens read, stayed as they were.
+  if (!target) {
+    throw new Error('Pembayaran ini belum tercatat lengkap, jadi belum bisa diubah dari sini.');
+  }
   // That one receipt can still be a spillover that also pays another tagihan.
   // Rewriting its allocations down to just this row would silently erase the
   // other tagihan's share of the same money.
-  if (target && (target.allocations || []).length > 1) {
+  if ((target.allocations || []).length > 1) {
     throw new Error(
       'Pembayaran ini bagian dari satu setoran yang juga menutup tagihan lain. Mengubahnya akan hadir di pembaruan berikutnya.'
     );
   }
 
-  const isLegacy = !!target && String(target.id).startsWith('legacy-');
+  const isLegacy = String(target.id).startsWith('legacy-');
 
   const payments = (p.payments || []).map((row) => {
     if (row.no !== no) return row;
@@ -73,7 +79,7 @@ export function applyPaymentEdit(project, no, { amount, at, accountId }) {
   });
 
   const receipts = (p.receipts || []).map((r) =>
-    target && r.id === target.id
+    r.id === target.id
       ? { ...r, amount, date: at, accountId, allocations: [{ no, amount }] }
       : r
   );
