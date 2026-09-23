@@ -93,6 +93,48 @@ describe('rowRemaining and rowState', () => {
   });
 });
 
+describe('unknown due (expectedAmount missing or not a number)', () => {
+  it('a null expectedAmount with nothing received is not settled', () => {
+    const r = row({ expectedAmount: null });
+    const p = legacy([r]);
+    expect(isSettled(p, r)).toBe(false);
+    expect(rowState(p, r)).toBe('belum');
+  });
+
+  it('a row with no expectedAmount field at all, with nothing received, is not settled', () => {
+    const r = { no: 1, type: 'interest', dueDate: new Date(2026, 9, 5) };
+    const p = legacy([r]);
+    expect(isSettled(p, r)).toBe(false);
+    expect(rowState(p, r)).toBe('belum');
+  });
+
+  it('a non-numeric expectedAmount with nothing received is not settled', () => {
+    const r = row({ expectedAmount: 'bukan angka' });
+    const p = legacy([r]);
+    expect(isSettled(p, r)).toBe(false);
+    expect(rowState(p, r)).toBe('belum');
+  });
+
+  it('a genuinely zero expectedAmount, unlike an unknown one, is settled', () => {
+    const r = row({ expectedAmount: 0 });
+    const p = legacy([r]);
+    expect(isSettled(p, r)).toBe(true);
+    expect(rowState(p, r)).toBe('lunas');
+  });
+
+  it('stays settled once money has arrived, even with an unknown expectedAmount', () => {
+    const r = row({ expectedAmount: null, receivedAmount: 1_000_000 });
+    const p = legacy([r]);
+    expect(isSettled(p, r)).toBe(true);
+  });
+
+  it('stays settled once waived, even with an unknown expectedAmount', () => {
+    const r = row({ expectedAmount: null, closure: { kind: 'waive', amount: 100_000 } });
+    const p = legacy([r]);
+    expect(isSettled(p, r)).toBe(true);
+  });
+});
+
 describe('isOverdue', () => {
   const r = row({ dueDate: new Date(2026, 9, 5) });
 

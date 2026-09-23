@@ -27,6 +27,10 @@ const projects = [
   { id: 'nothing-paid', payments: [
     { no: 1, expectedAmount: 5_500_000, receivedAmount: null, type: 'interest' },
   ] },
+  { id: 'unknown-due', payments: [
+    { no: 1, expectedAmount: null, receivedAmount: null, type: 'interest' },
+    { no: 2, expectedAmount: 5_500_000, receivedAmount: 5_500_000, type: 'interest' },
+  ] },
   { id: 'no-payments', payments: [] },
 ];
 

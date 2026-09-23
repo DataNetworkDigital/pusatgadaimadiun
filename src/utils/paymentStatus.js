@@ -45,16 +45,40 @@ export function rowWaived(row) {
   return c && c.kind === 'waive' ? Number(c.amount) || 0 : 0;
 }
 
+// True only when row.expectedAmount is a real, finite amount. Number(null) is
+// 0 and Number(undefined) is NaN, so this checks the raw field first: null
+// and undefined both mean "nobody has told us the amount yet", not "zero is
+// owed", and a non-numeric value (bad import, typo) is unknown for the same
+// reason.
+function hasKnownDue(row) {
+  const raw = row?.expectedAmount;
+  return raw != null && Number.isFinite(Number(raw));
+}
+
+// A row with an unknown due (see hasKnownDue above) still reports a
+// remaining of 0 here, the same number a row that truly owes nothing would
+// report. That is deliberate: we genuinely do not know what is owed, and
+// inventing a number would be worse than reporting none. Do not "fix" this
+// into a guessed amount -- isSettled and rowState below are what keep an
+// unknown-due, untouched row visible as "belum" instead of reading this 0 as
+// "nothing owed".
 export function rowRemaining(project, row) {
   return Math.max(0, rowDue(row) - rowReceived(project, row) - rowWaived(row));
 }
 
 export function isSettled(project, row) {
+  // An unknown due only counts as settled once money has actually arrived or
+  // been waived -- otherwise rowRemaining's 0 would silently read as "paid
+  // in full" and the row would vanish from the collector's list of what is
+  // still owed, which is exactly the row that most needs to stay visible.
+  if (!hasKnownDue(row) && rowReceived(project, row) === 0 && rowWaived(row) === 0) {
+    return false;
+  }
   return rowRemaining(project, row) === 0;
 }
 
 export function rowState(project, row) {
-  if (rowRemaining(project, row) === 0) return 'lunas';
+  if (isSettled(project, row)) return 'lunas';
   return rowReceived(project, row) > 0 ? 'kurang' : 'belum';
 }
 
