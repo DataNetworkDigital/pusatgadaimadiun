@@ -6,12 +6,6 @@ import { formatDate, MONTHS, toDate } from './formatDate';
 import { projectSummary, projectEndFromDuration } from './projectSchedule';
 import { PROJECT_COLUMNS, COLLECTION_COLUMNS, pickColumns, cellValue, cellText, pdfLayout } from './exportColumns';
 
-const STATUS_LABEL = {
-  active: 'Aktif',
-  completed: 'Selesai',
-  default: 'Macet',
-};
-
 function projectSheetRows(list, picked, accountName) {
   return list.map((p, index) => {
     const ctx = { index, accountName };
@@ -121,26 +115,22 @@ function pdfHeader(doc, periodLabel) {
   doc.text(`Dicetak: ${formatDate(new Date())}`, 14, 31);
 }
 
-function projectsToPdfRows(list, accountName) {
-  return list.map((p, i) => {
-    const summary = projectSummary(p);
-    return [
-      i + 1,
-      p.name + (p.ownerName ? `\n(${p.ownerName})` : ''),
-      STATUS_LABEL[p.status] || p.status,
-      formatCurrency(p.disbursedAmount),
-      `${p.monthlyReturnPct}%`,
-      `${p.durationMonths} bln`,
-      formatCurrency(summary.receivedSoFar),
-      formatCurrency(summary.expectedRemaining),
-      formatCurrency(summary.netCashChange),
-    ];
-  });
+function projectsToPdfRows(list, picked, accountName) {
+  return list.map((p, index) => picked.map((c) => cellText(c, p, { index, accountName })));
 }
 
-export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = null) {
+// Placeholder line that keeps the column count intact when a section is empty.
+function emptyPdfRow(picked, message) {
+  return [picked.map((c, i) => (i === 0 ? '—' : i === 1 ? message : ''))];
+}
+
+export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = null, columnKeys = null) {
   const accountName = (id) => accounts.find((a) => a.id === id)?.name || '';
-  const doc = new jsPDF();
+  const picked = pickColumns(PROJECT_COLUMNS, columnKeys);
+  const { orientation, columnStyles } = pdfLayout(picked);
+  const doc = new jsPDF({ orientation });
+  const margin = orientation === 'landscape' ? { left: 6, right: 6 } : { left: 14, right: 14 };
+
   const sourceList = filter ? projectsTouchedByFilter(projects, filter) : projects;
   const active = sourceList.filter((p) => p.status === 'active');
   const archive = sourceList.filter((p) => p.status === 'completed' || p.status === 'default');
@@ -154,93 +144,47 @@ export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = n
   pdfHeader(doc, periodLabel);
 
   let cursorY = 38;
-  const columns = [
-    { header: 'No', dataKey: 0 },
-    { header: 'Nama / Pemilik', dataKey: 1 },
-    { header: 'Status', dataKey: 2 },
-    { header: 'Modal Keluar', dataKey: 3 },
-    { header: 'Return/bln', dataKey: 4 },
-    { header: 'Durasi', dataKey: 5 },
-    { header: 'Diterima', dataKey: 6 },
-    { header: 'Sisa', dataKey: 7 },
-    { header: 'Net', dataKey: 8 },
-  ];
-
-  if (includeActive) {
+  const table = (title, list, fillColor, emptyMessage) => {
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.text('Project Aktif', 14, cursorY);
+    doc.text(title, margin.left, cursorY);
     cursorY += 4;
     autoTable(doc, {
-      head: [columns.map((c) => c.header)],
-      body: active.length > 0 ? projectsToPdfRows(active, accountName) : [['—', 'Tidak ada project aktif', '', '', '', '', '', '', '']],
+      head: [picked.map((c) => c.label)],
+      body: list.length > 0
+        ? projectsToPdfRows(list, picked, accountName)
+        : emptyPdfRow(picked, emptyMessage),
       startY: cursorY,
-      styles: { fontSize: 8.5, cellPadding: 2 },
-      headStyles: { fillColor: [45, 74, 107], textColor: 248 },
-      columnStyles: {
-        0: { cellWidth: 8 },
-        1: { cellWidth: 40 },
-        2: { cellWidth: 18 },
-        3: { cellWidth: 24, halign: 'right' },
-        4: { cellWidth: 16, halign: 'right' },
-        5: { cellWidth: 12, halign: 'right' },
-        6: { cellWidth: 22, halign: 'right' },
-        7: { cellWidth: 22, halign: 'right' },
-        8: { cellWidth: 22, halign: 'right' },
-      },
+      margin,
+      styles: { fontSize: 8.5, cellPadding: 2, overflow: 'linebreak' },
+      headStyles: { fillColor, textColor: 248 },
+      columnStyles,
     });
     cursorY = doc.lastAutoTable.finalY + 8;
-  }
+  };
 
-  if (includeArchive) {
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Riwayat Project', 14, cursorY);
-    cursorY += 4;
-    autoTable(doc, {
-      head: [columns.map((c) => c.header)],
-      body: archive.length > 0 ? projectsToPdfRows(archive, accountName) : [['—', 'Tidak ada riwayat project', '', '', '', '', '', '', '']],
-      startY: cursorY,
-      styles: { fontSize: 8.5, cellPadding: 2 },
-      headStyles: { fillColor: [184, 84, 80], textColor: 248 },
-      columnStyles: {
-        0: { cellWidth: 8 },
-        1: { cellWidth: 40 },
-        2: { cellWidth: 18 },
-        3: { cellWidth: 24, halign: 'right' },
-        4: { cellWidth: 16, halign: 'right' },
-        5: { cellWidth: 12, halign: 'right' },
-        6: { cellWidth: 22, halign: 'right' },
-        7: { cellWidth: 22, halign: 'right' },
-        8: { cellWidth: 22, halign: 'right' },
-      },
-    });
-    cursorY = doc.lastAutoTable.finalY + 8;
-  }
+  if (includeActive) table('Project Aktif', active, [45, 74, 107], 'Tidak ada project aktif');
+  if (includeArchive) table('Riwayat Project', archive, [184, 84, 80], 'Tidak ada riwayat project');
 
   // Summary footer
   const totalDisbursed = sourceList.reduce((s, p) => s + (p.disbursedAmount || 0), 0);
-  const totalReceived = sourceList.reduce(
-    (s, p) => s + projectSummary(p).receivedSoFar,
-    0
-  );
-  let totalReceivedInRange = totalReceived;
+  let totalReceived = sourceList.reduce((s, p) => s + projectSummary(p).receivedSoFar, 0);
   if (filter) {
-    totalReceivedInRange = 0;
+    totalReceived = 0;
     sourceList.forEach((p) => {
       (p.payments || []).forEach((pay) => {
         if (pay.receivedDate && inDateRange(pay.receivedDate, filter)) {
-          totalReceivedInRange += pay.receivedAmount || 0;
+          totalReceived += pay.receivedAmount || 0;
         }
       });
     });
   }
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Total Modal Keluar: ${formatCurrency(totalDisbursed)}`, 14, cursorY);
+  doc.text(`Total Modal Keluar: ${formatCurrency(totalDisbursed)}`, margin.left, cursorY);
   doc.text(
-    `Total Diterima${filter ? ' (dalam rentang)' : ''}: ${formatCurrency(totalReceivedInRange)}`,
-    14,
+    `Total Diterima${filter ? ' (dalam rentang)' : ''}: ${formatCurrency(totalReceived)}`,
+    margin.left,
     cursorY + 6
   );
 
