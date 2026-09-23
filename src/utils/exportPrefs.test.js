@@ -39,6 +39,11 @@ describe('exportPrefs', () => {
     expect(loadColumnKeys('project', ['no'])).toEqual(['no']);
   });
 
+  it('drops non-string entries from a mixed stored array', () => {
+    globalThis.localStorage = fakeStorage({ 'pgm.exportCols.project': JSON.stringify([1, 'no', null]) });
+    expect(loadColumnKeys('project', ['fallback'])).toEqual(['no']);
+  });
+
   it('survives storage that throws, as in private mode', () => {
     globalThis.localStorage = {
       getItem: () => { throw new Error('blocked'); },

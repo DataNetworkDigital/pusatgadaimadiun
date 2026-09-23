@@ -4,9 +4,11 @@ import {
   COLLECTION_COLUMNS,
   defaultKeys,
   pickColumns,
+  cellValue,
   cellText,
   formatTierPct,
   pdfLayout,
+  LANDSCAPE_WIDTH,
 } from './exportColumns';
 
 const project = {
@@ -57,6 +59,11 @@ describe('pickColumns', () => {
   it('ignores keys that are not in the registry', () => {
     expect(pickColumns(PROJECT_COLUMNS, ['no', 'tidak-ada']).map((c) => c.key)).toEqual(['no']);
   });
+
+  it('falls back to the defaults when every saved key is stale (e.g. a renamed column)', () => {
+    const picked = pickColumns(PROJECT_COLUMNS, ['kolom-lama-1', 'kolom-lama-2']);
+    expect(picked.map((c) => c.key)).toEqual(defaultKeys(PROJECT_COLUMNS));
+  });
 });
 
 describe('formatTierPct', () => {
@@ -66,6 +73,18 @@ describe('formatTierPct', () => {
 
   it('shows one value for a legacy flat-rate project', () => {
     expect(formatTierPct({ monthlyReturnPct: 5 })).toBe('5%');
+  });
+
+  it('drops a non-numeric string tier and shows just the other, valid tier', () => {
+    expect(formatTierPct({ returnPctTier1: 'abc', returnPctTier2: 6.5 })).toBe('6,5%');
+  });
+
+  it('treats a null tier2 as "no override" and shows the single tier1 value', () => {
+    expect(formatTierPct({ returnPctTier1: 5.5, returnPctTier2: null })).toBe('5,5%');
+  });
+
+  it('falls back to "-" when both tiers are corrupt and nothing finite is left to show', () => {
+    expect(formatTierPct({ returnPctTier1: 'x', returnPctTier2: 'y' })).toBe('-');
   });
 });
 
@@ -86,6 +105,57 @@ describe('cellText', () => {
   });
 });
 
+describe('cellText keeps PDF text in sync with the Excel value for currency columns', () => {
+  const byKey = (k) => PROJECT_COLUMNS.find((c) => c.key === k);
+  // A truthy but non-numeric field, as a legacy or hand-edited Firestore
+  // document could plausibly contain.
+  const bad = {
+    principalAmount: 'bukan angka',
+    disbursedAmount: 'bukan angka',
+    lossAmount: 'bukan angka',
+  };
+
+  it.each(['principal', 'disbursed', 'loss'])(
+    'coerces a non-numeric %s to 0 the same way in Excel and PDF (no "Rp NaN")',
+    (key) => {
+      const col = byKey(key);
+      expect(col.value(bad, ctx)).toBe(0);
+      expect(cellText(col, bad, ctx)).toBe('Rp 0');
+    }
+  );
+});
+
+describe('error isolation', () => {
+  const projectColumn = (k) => PROJECT_COLUMNS.find((c) => c.key === k);
+  const throwingValueCol = {
+    key: 'boom', label: 'Boom', value: () => { throw new Error('kaboom'); },
+  };
+  const throwingTextCol = {
+    key: 'boom2', label: 'Boom2', value: () => 'ok', text: () => { throw new Error('kaboom'); },
+  };
+
+  it('cellValue degrades a throwing column to an empty string instead of crashing', () => {
+    expect(() => cellValue(throwingValueCol, project, ctx)).not.toThrow();
+    expect(cellValue(throwingValueCol, project, ctx)).toBe('');
+  });
+
+  it('cellText degrades a throwing value() to an empty string instead of crashing', () => {
+    expect(() => cellText(throwingValueCol, project, ctx)).not.toThrow();
+    expect(cellText(throwingValueCol, project, ctx)).toBe('');
+  });
+
+  it('cellText degrades a throwing text() to an empty string instead of crashing', () => {
+    expect(() => cellText(throwingTextCol, project, ctx)).not.toThrow();
+    expect(cellText(throwingTextCol, project, ctx)).toBe('');
+  });
+
+  it('one throwing column does not stop the rest of the row from rendering', () => {
+    const row = [projectColumn('name'), throwingValueCol, projectColumn('status')]
+      .map((c) => cellText(c, project, ctx));
+    expect(row).toEqual(['PINDANG', '', 'Aktif']);
+  });
+});
+
 describe('pdfLayout', () => {
   it('stays portrait for a narrow selection and gives the rest to the flexible column', () => {
     const picked = pickColumns(PROJECT_COLUMNS, ['no', 'name', 'status']);
@@ -100,9 +170,53 @@ describe('pdfLayout', () => {
     expect(pdfLayout(pickColumns(PROJECT_COLUMNS, defaultKeys(PROJECT_COLUMNS))).orientation).toBe('landscape');
   });
 
-  it('never shrinks the flexible column below 20mm', () => {
+  it('gives the flexible column comfortable room, well above the 20mm floor, when the page has space', () => {
+    const picked = pickColumns(PROJECT_COLUMNS, defaultKeys(PROJECT_COLUMNS));
+    const nameIdx = picked.findIndex((c) => c.key === 'name');
+    expect(pdfLayout(picked).columnStyles[nameIdx].cellWidth).toBe(39);
+  });
+
+  // Replaces the old "never shrinks the flexible column below 20mm" assertion.
+  // Guaranteeing the table fits the page and holding a hard 20mm floor are
+  // contradictory once the fixed columns alone overflow — fit wins.
+  it('always fits the page even when every column is selected, both flex columns included', () => {
     const picked = pickColumns(PROJECT_COLUMNS, PROJECT_COLUMNS.map((c) => c.key));
-    expect(pdfLayout(picked).columnStyles[1].cellWidth).toBeGreaterThanOrEqual(20);
+    const { orientation, columnStyles } = pdfLayout(picked);
+    expect(orientation).toBe('landscape');
+    const total = Object.values(columnStyles).reduce((s, cs) => s + cs.cellWidth, 0);
+    expect(total).toBeLessThanOrEqual(LANDSCAPE_WIDTH);
+  });
+
+  it('always fits the page when the fixed columns alone overflow, even with no flex column selected', () => {
+    // Every non-flex column at once: the old code had nothing to shrink here
+    // (flexIdx === -1 skipped the fitting block entirely).
+    const nonFlexKeys = PROJECT_COLUMNS.filter((c) => !c.flex).map((c) => c.key);
+    const picked = pickColumns(PROJECT_COLUMNS, nonFlexKeys);
+    const { columnStyles } = pdfLayout(picked);
+    const total = Object.values(columnStyles).reduce((s, cs) => s + cs.cellWidth, 0);
+    expect(total).toBeLessThanOrEqual(LANDSCAPE_WIDTH);
+  });
+
+  it('fits the page for a representative no-flex-column selection', () => {
+    const picked = pickColumns(PROJECT_COLUMNS, [
+      'no', 'status', 'disbursed', 'received', 'remaining', 'net',
+      'phone', 'collateral', 'nik', 'sourceAccount', 'loss', 'closedAt',
+    ]);
+    const { columnStyles } = pdfLayout(picked);
+    const total = Object.values(columnStyles).reduce((s, cs) => s + cs.cellWidth, 0);
+    expect(total).toBeLessThanOrEqual(LANDSCAPE_WIDTH);
+  });
+});
+
+describe('column labels', () => {
+  it('are unique within PROJECT_COLUMNS (Task 6 keys Excel rows by label)', () => {
+    const labels = PROJECT_COLUMNS.map((c) => c.label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it('are unique within COLLECTION_COLUMNS (Task 6 keys Excel rows by label)', () => {
+    const labels = COLLECTION_COLUMNS.map((c) => c.label);
+    expect(new Set(labels).size).toBe(labels.length);
   });
 });
 

@@ -17,19 +17,26 @@ const STATUS_LABEL = {
 // the 6mm margins the Daftar Tagihan PDF already uses.
 export const PORTRAIT_WIDTH = 182;
 export const LANDSCAPE_WIDTH = 285;
-const MIN_FLEX_WIDTH = 20;
+const MIN_FLEX_WIDTH = 20; // mm; what a flex column gets while there is room to spare
+const MIN_ABS_WIDTH = 8; // mm; absolute last-resort floor once even proportional shrinking can't fit
 
 // "5,5% / 6,5%" for tiered projects, "5,5%" when both tiers are the same or the
-// project predates tiers.
+// project predates tiers. A tier that isn't a finite number (corrupt/legacy
+// data) is dropped rather than rendered as "NaN%"; if nothing finite is left,
+// falls back to '-' like the rest of this codebase does for unknown values
+// (see formatDate).
 export function formatTierPct(project) {
   const { tier1, tier2 } = resolveTiers(project);
   const fmt = (n) => `${String(n).replace('.', ',')}%`;
-  return tier1 === tier2 ? fmt(tier1) : `${fmt(tier1)} / ${fmt(tier2)}`;
+  const distinct = [...new Set([tier1, tier2].filter((n) => Number.isFinite(n)))];
+  if (!distinct.length) return '-';
+  if (distinct.length === 1) return fmt(distinct[0]);
+  return `${fmt(distinct[0])} / ${fmt(distinct[1])}`;
 }
 
 // Each column: `value` feeds Excel (numbers stay numbers), `text` feeds the PDF
-// (always a string). `width` is the PDF column width in mm. Exactly one selected
-// column with `flex: true` absorbs the leftover page width — the first one.
+// (always a string). `width` is the PDF column width in mm. Every selected
+// column with `flex: true` shares the leftover page width evenly.
 export const PROJECT_COLUMNS = [
   { key: 'no', label: 'No', defaultOn: true, width: 8, align: 'right',
     value: (p, ctx) => ctx.index + 1 },
@@ -52,10 +59,10 @@ export const PROJECT_COLUMNS = [
     text: (p) => `${Number(p.durationMonths) || 0} bln` },
   { key: 'principal', label: 'Nilai Project', defaultOn: false, width: 24, align: 'right',
     value: (p) => Number(p.principalAmount) || 0,
-    text: (p) => formatCurrency(p.principalAmount) },
+    text: (p) => formatCurrency(Number(p.principalAmount) || 0) },
   { key: 'disbursed', label: 'Modal Keluar', defaultOn: true, width: 24, align: 'right',
     value: (p) => Number(p.disbursedAmount) || 0,
-    text: (p) => formatCurrency(p.disbursedAmount) },
+    text: (p) => formatCurrency(Number(p.disbursedAmount) || 0) },
   { key: 'ratePct', label: 'Bagi Hasil', defaultOn: true, width: 22, align: 'right',
     value: (p) => formatTierPct(p) },
   { key: 'received', label: 'Sudah Diterima', defaultOn: true, width: 24, align: 'right',
@@ -79,7 +86,7 @@ export const PROJECT_COLUMNS = [
     value: (p, ctx) => ctx.accountName(p.sourceAccountId) },
   { key: 'loss', label: 'Kerugian Final', defaultOn: false, width: 24, align: 'right',
     value: (p) => Number(p.lossAmount) || 0,
-    text: (p) => formatCurrency(p.lossAmount || 0) },
+    text: (p) => formatCurrency(Number(p.lossAmount) || 0) },
   { key: 'closedAt', label: 'Tanggal Tutup', defaultOn: false, width: 20,
     value: (p) => (p.closedAt ? formatDate(p.closedAt) : '') },
   { key: 'note', label: 'Catatan', defaultOn: false, width: 40,
@@ -119,39 +126,90 @@ export function pickColumns(columns, keys) {
   return picked.length ? picked : columns.filter((c) => c.defaultOn);
 }
 
+// One bad cell (a throwing accessor, unexpected data shape, etc.) must not
+// take down the whole export — degrade just that cell to '' and let the rest
+// of the row render.
 export function cellValue(col, item, ctx) {
-  return col.value(item, ctx);
+  try {
+    return col.value(item, ctx);
+  } catch {
+    return '';
+  }
 }
 
 export function cellText(col, item, ctx) {
-  if (col.text) return col.text(item, ctx);
-  const v = col.value(item, ctx);
-  return v == null ? '' : String(v);
+  try {
+    if (col.text) return col.text(item, ctx);
+    const v = col.value(item, ctx);
+    return v == null ? '' : String(v);
+  } catch {
+    return '';
+  }
 }
 
-// Fixed widths for every selected column except the first flexible one, which
-// takes whatever space is left. Landscape kicks in as soon as the fixed widths
-// stop fitting a portrait page.
+// Shrinks `widths` (mutated copy returned, input untouched) so they sum to at
+// most `avail`, never letting any single column go below MIN_ABS_WIDTH unless
+// avail itself can't fit MIN_ABS_WIDTH per column (a selection so wide no
+// layout could save it). One scale-and-floor pass is not enough: flooring a
+// column that would have shrunk below MIN_ABS_WIDTH gives it back more than
+// its fair share, which can itself push a *different*, previously-fine column
+// below the floor. So this pins columns to the floor one round at a time and
+// re-solves the remaining "free" columns against the remaining budget, same
+// idea as CSS flexbox min-width resolution — until nothing new gets pinned.
+// Bounded by the column count, so it always terminates.
+function shrinkToFit(widths, avail) {
+  const total = widths.reduce((s, w) => s + w, 0);
+  if (total <= avail) return widths.slice();
+
+  const out = widths.slice();
+  const pinned = new Array(out.length).fill(false);
+  for (let pass = 0; pass < out.length; pass++) {
+    const pinnedTotal = out.reduce((s, w, i) => (pinned[i] ? s + w : s), 0);
+    const freeTotal = out.reduce((s, w, i) => (pinned[i] ? s : s + w), 0);
+    if (freeTotal <= 0) break;
+    const factor = (avail - pinnedTotal) / freeTotal;
+    let pinnedMore = false;
+    out.forEach((w, i) => {
+      if (pinned[i]) return;
+      const scaled = w * factor;
+      if (scaled <= MIN_ABS_WIDTH) {
+        out[i] = MIN_ABS_WIDTH;
+        pinned[i] = true;
+        pinnedMore = true;
+      } else {
+        out[i] = scaled;
+      }
+    });
+    if (!pinnedMore) break;
+  }
+  return out;
+}
+
+// Fixed widths for every selected column except the flexible ones, which
+// share the leftover page width evenly. Landscape kicks in as soon as the
+// *declared* widths stop fitting a portrait page. Whatever the declared
+// widths add up to, the final layout is shrunk (see shrinkToFit) so the table
+// always fits the chosen page — it never just overflows off the edge.
 export function pdfLayout(picked, opts = {}) {
   const portraitWidth = opts.portraitWidth ?? PORTRAIT_WIDTH;
   const landscapeWidth = opts.landscapeWidth ?? LANDSCAPE_WIDTH;
-  const total = picked.reduce((s, c) => s + c.width, 0);
-  const orientation = total > portraitWidth ? 'landscape' : 'portrait';
+  const declaredTotal = picked.reduce((s, c) => s + c.width, 0);
+  const orientation = declaredTotal > portraitWidth ? 'landscape' : 'portrait';
   const avail = orientation === 'landscape' ? landscapeWidth : portraitWidth;
-  const flexIdx = picked.findIndex((c) => c.flex);
+
+  const flexCols = picked.filter((c) => c.flex);
+  const nonFlexTotal = picked.reduce((s, c) => (c.flex ? s : s + c.width), 0);
+  const leftover = avail - nonFlexTotal;
+  const flexShare = flexCols.length ? Math.max(MIN_FLEX_WIDTH, leftover / flexCols.length) : 0;
+  const rawWidths = picked.map((c) => (c.flex ? flexShare : c.width));
+
+  // Whole millimetres, like every other width in this file, and immune to a
+  // float sum ever landing a hair above `avail`.
+  const widths = shrinkToFit(rawWidths, avail).map((w) => Math.floor(w));
 
   const columnStyles = {};
   picked.forEach((c, i) => {
-    if (i === flexIdx) return;
-    columnStyles[i] = { cellWidth: c.width, ...(c.align ? { halign: c.align } : {}) };
+    columnStyles[i] = { cellWidth: widths[i], ...(c.align ? { halign: c.align } : {}) };
   });
-  if (flexIdx >= 0) {
-    const fixed = picked.reduce((s, c, i) => (i === flexIdx ? s : s + c.width), 0);
-    const flex = picked[flexIdx];
-    columnStyles[flexIdx] = {
-      cellWidth: Math.max(MIN_FLEX_WIDTH, avail - fixed),
-      ...(flex.align ? { halign: flex.align } : {}),
-    };
-  }
   return { orientation, columnStyles };
 }
