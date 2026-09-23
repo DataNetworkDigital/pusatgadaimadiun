@@ -4,6 +4,7 @@ import autoTable from 'jspdf-autotable';
 import { formatCurrency } from './formatCurrency';
 import { formatDate, MONTHS, toDate } from './formatDate';
 import { projectSummary, projectEndFromDuration } from './projectSchedule';
+import { isSettled, rowRemaining, rowReceived } from './paymentStatus';
 import { PROJECT_COLUMNS, COLLECTION_COLUMNS, pickColumns, cellValue, cellText, pdfLayout } from './exportColumns';
 
 export function projectSheetRows(list, picked, accountName) {
@@ -27,10 +28,13 @@ function paymentRow(p, payment, accountName) {
     Jenis: payment.type === 'final' ? 'Pelunasan' : 'Cicilan Return',
     'Jatuh Tempo': payment.dueDate ? formatDate(payment.dueDate) : '',
     'Estimasi (Rp)': payment.expectedAmount,
-    'Diterima (Rp)': payment.receivedAmount ?? '',
+    // Blank when no money reached this tagihan, otherwise the amount. Written
+    // as an explicit comparison rather than `|| ''` because this is a currency
+    // cell: `||` would also blank a legitimate zero.
+    'Diterima (Rp)': rowReceived(p, payment) > 0 ? rowReceived(p, payment) : '',
     'Tanggal Diterima': payment.receivedDate ? formatDate(payment.receivedDate) : '',
     'Rekening Tujuan': accountName(payment.accountId),
-    Status: payment.receivedAmount != null ? 'Diterima' : 'Belum',
+    Status: isSettled(p, payment) ? 'Diterima' : 'Belum',
   };
 }
 
@@ -174,7 +178,7 @@ export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = n
     sourceList.forEach((p) => {
       (p.payments || []).forEach((pay) => {
         if (pay.receivedDate && inDateRange(pay.receivedDate, filter)) {
-          totalReceived += pay.receivedAmount || 0;
+          totalReceived += rowReceived(p, pay);
         }
       });
     });
@@ -208,7 +212,7 @@ function collectionRows(projects, filter) {
     (p.payments || []).forEach((pay) => {
       if (!pay.dueDate) return;
       if (filter && !inDateRange(pay.dueDate, filter)) return;
-      const paid = pay.receivedAmount != null;
+      const paid = isSettled(p, pay);
       rows.push({
         project: p.name,
         owner: p.ownerName || '',
@@ -222,7 +226,7 @@ function collectionRows(projects, filter) {
         due: toDate(pay.dueDate),
         dueStr: formatDate(pay.dueDate),
         jenis: pay.type === 'final' ? 'Pelunasan' : 'Cicilan',
-        amount: paid ? (pay.receivedAmount || 0) : (pay.expectedAmount || 0),
+        amount: paid ? rowReceived(p, pay) : rowRemaining(p, pay),
         status: paid ? 'Lunas' : 'Belum',
         paidStr: pay.receivedDate ? formatDate(pay.receivedDate) : '',
       });
