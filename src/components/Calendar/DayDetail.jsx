@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { formatDate, isSameDay, toDate } from '../../utils/formatDate';
+import { isSettled } from '../../utils/paymentStatus';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { useDemo } from '../../contexts/DemoContext';
 import Card from '../common/Card';
@@ -31,7 +32,7 @@ export default function DayDetail({
   projects.forEach((p) => {
     if (p.status !== 'active') return;
     (p.payments || []).forEach((pay) => {
-      if (pay.receivedAmount == null && isSameDay(toDate(pay.dueDate), date)) {
+      if (!isSettled(p, pay) && isSameDay(toDate(pay.dueDate), date)) {
         dayProjectPayments.push({ project: p, payment: pay });
       }
     });

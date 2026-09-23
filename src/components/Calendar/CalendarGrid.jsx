@@ -1,4 +1,5 @@
 import { DAYS, isSameDay, toDate, monthLabel } from '../../utils/formatDate';
+import { isSettled } from '../../utils/paymentStatus';
 import { IcChevronLeft, IcChevronRight } from '../common/icons';
 import Card from '../common/Card';
 
@@ -46,7 +47,7 @@ export default function CalendarGrid({
     projects.forEach((p) => {
       if (p.status !== 'active') return;
       (p.payments || []).forEach((pay) => {
-        if (pay.receivedAmount == null && isSameDay(toDate(pay.dueDate), date)) {
+        if (!isSettled(p, pay) && isSameDay(toDate(pay.dueDate), date)) {
           hasProject = true;
         }
       });

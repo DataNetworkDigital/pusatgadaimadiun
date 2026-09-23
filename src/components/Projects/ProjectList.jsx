@@ -11,6 +11,7 @@ import ExportSheet from './ExportSheet';
 import PeriodPickerSheet, { resolvePeriod } from './PeriodPickerSheet';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { projectSummary } from '../../utils/projectSchedule';
+import { rowReceived, isSettled } from '../../utils/paymentStatus';
 import {
   exportProjectsToExcel,
   exportProjectsToPdf,
@@ -103,10 +104,10 @@ export default function ProjectList() {
         const inRangeRecv = recv && (!range.from || recv >= range.from) && (!range.to || recv <= range.to);
         const inRangeDue = due && (!range.from || due >= range.from) && (!range.to || due <= range.to);
         if (inRangeRecv) {
-          received += pay.receivedAmount || 0;
+          received += rowReceived(p, pay);
           receivedCount += 1;
         }
-        if (inRangeDue && pay.receivedAmount == null) {
+        if (inRangeDue && !isSettled(p, pay)) {
           pending += pay.expectedAmount || 0;
         }
       });

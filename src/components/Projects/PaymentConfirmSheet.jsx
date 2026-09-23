@@ -4,9 +4,10 @@ import CurrencyInput from '../common/CurrencyInput';
 import DateField from '../common/DateField';
 import { formatDateInput, fromDateInput, formatDate, toDate } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { rowReceived } from '../../utils/paymentStatus';
 
 export default function PaymentConfirmSheet({ open, onClose, project, payment, accounts, onConfirm }) {
-  const isEdit = payment?.receivedAmount != null;
+  const isEdit = !!payment && rowReceived(project, payment) > 0;
   const [accountId, setAccountId] = useState('');
   const [amount, setAmount] = useState(0);
   const [date, setDate] = useState(formatDateInput(new Date()));
@@ -15,9 +16,9 @@ export default function PaymentConfirmSheet({ open, onClose, project, payment, a
 
   useEffect(() => {
     if (open && payment) {
-      if (payment.receivedAmount != null) {
+      if (rowReceived(project, payment) > 0) {
         setAccountId(payment.accountId || project?.sourceAccountId || accounts?.[0]?.id || '');
-        setAmount(payment.receivedAmount || 0);
+        setAmount(rowReceived(project, payment));
         setDate(formatDateInput(payment.receivedDate || new Date()));
       } else {
         setAccountId(project?.sourceAccountId || accounts?.[0]?.id || '');

@@ -13,6 +13,7 @@ import ProjectForm from './ProjectForm';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { projectSummary } from '../../utils/projectSchedule';
+import { isSettled, rowReceived } from '../../utils/paymentStatus';
 import {
   IcChevronLeft,
   IcCalendar,
@@ -42,10 +43,10 @@ function StatRow({ label, value, valueClass = 'text-ink', isLast }) {
   );
 }
 
-function PaymentRow({ payment, onConfirm, onEdit, editable, isLast }) {
+function PaymentRow({ project, payment, onConfirm, onEdit, editable, isLast }) {
   const due = toDate(payment.dueDate);
   const recv = toDate(payment.receivedDate);
-  const isPaid = payment.receivedAmount != null;
+  const isPaid = isSettled(project, payment);
   const isFinal = payment.type === 'final';
   const days = due ? daysBetween(new Date(), due) : 0;
   const overdue = !isPaid && days < 0;
@@ -88,7 +89,7 @@ function PaymentRow({ payment, onConfirm, onEdit, editable, isLast }) {
           }`}
           style={{ fontVariantNumeric: 'tabular-nums' }}
         >
-          {formatCurrency(isPaid ? payment.receivedAmount : payment.expectedAmount, false)}
+          {formatCurrency(isPaid ? rowReceived(project, payment) : payment.expectedAmount, false)}
         </div>
         {!isPaid && (
           <button
@@ -160,7 +161,7 @@ export default function ProjectDetail() {
 
   async function handleConfirmPayment(data) {
     if (!paying) return;
-    if (paying.receivedAmount != null) {
+    if (rowReceived(project, paying) > 0) {
       await updateProjectPayment(project.id, paying.no, data);
     } else {
       await recordProjectPayment(project.id, paying.no, data);
@@ -323,6 +324,7 @@ export default function ProjectDetail() {
         {project.payments.map((p, i) => (
           <PaymentRow
             key={p.no}
+            project={project}
             payment={p}
             onConfirm={(pay) => isActive && setPaying(pay)}
             onEdit={(pay) => (isActive || isCompleted) && setPaying(pay)}

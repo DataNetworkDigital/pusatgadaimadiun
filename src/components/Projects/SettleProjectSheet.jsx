@@ -5,6 +5,7 @@ import DateField from '../common/DateField';
 import { formatDateInput, fromDateInput } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { projectSummary } from '../../utils/projectSchedule';
+import { isSettled } from '../../utils/paymentStatus';
 
 // Early full settlement (pelunasan dipercepat). The default amount follows the
 // owner's rule: modal keluar (disbursed) + the current month's interest. All
@@ -22,14 +23,14 @@ export default function SettleProjectSheet({ open, onClose, project, accounts, o
     const principal = Number(project.principalAmount) || 0;
     const payments = project.payments || [];
     const nextInterest = payments.find(
-      (p) => p.receivedAmount == null && p.type === 'interest'
+      (p) => !isSettled(project, p) && p.type === 'interest'
     );
     // Current month's interest; fall back to the interest deducted upfront
     // (principal − disbursed) when only the final principal is left unpaid.
     const curInt = nextInterest
       ? Number(nextInterest.expectedAmount) || 0
       : Math.max(0, principal - disb);
-    const unpaid = payments.filter((p) => p.receivedAmount == null).length;
+    const unpaid = payments.filter((p) => !isSettled(project, p)).length;
     return {
       disbursed: disb,
       currentInterest: curInt,

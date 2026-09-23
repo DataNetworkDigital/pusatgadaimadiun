@@ -11,6 +11,7 @@ import {
   TIER1_MAX_MONTH,
 } from '../../utils/projectSchedule';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { hasAnyReceipt } from '../../utils/paymentStatus';
 
 // Disbursed auto-fills as the project value minus the first-month return %
 // taken upfront, e.g. 100jt at 5.5% → (100% − 5.5%) × 100jt = 94.5jt.
@@ -23,7 +24,7 @@ function computeAutoDisbursed(principal, pct) {
 
 export default function ProjectForm({ open, onClose, onSubmit, accounts, initial }) {
   const isEdit = !!initial;
-  const hasReceived = isEdit && (initial.payments || []).some((p) => p.receivedAmount != null);
+  const hasReceived = isEdit && hasAnyReceipt(initial);
   const capitalLocked = hasReceived;
 
   const [name, setName] = useState('');
