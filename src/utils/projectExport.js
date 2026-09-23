@@ -105,14 +105,14 @@ export function exportProjectsToExcel(projects, accounts, filter = null, columnK
   XLSX.writeFile(wb, `Pusat Gadai Madiun_Project_${downloadFilenameStamp()}.xlsx`);
 }
 
-function pdfHeader(doc, periodLabel) {
+function pdfHeader(doc, periodLabel, marginLeft) {
   doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
-  doc.text('Laporan Project — Pusat Gadai Madiun', 14, 18);
+  doc.text('Laporan Project — Pusat Gadai Madiun', marginLeft, 18);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Cakupan: ${periodLabel}`, 14, 25);
-  doc.text(`Dicetak: ${formatDate(new Date())}`, 14, 31);
+  doc.text(`Cakupan: ${periodLabel}`, marginLeft, 25);
+  doc.text(`Dicetak: ${formatDate(new Date())}`, marginLeft, 31);
 }
 
 export function projectsToPdfRows(list, picked, accountName) {
@@ -141,7 +141,7 @@ export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = n
     mode === 'active' ? 'Project Aktif' : mode === 'archive' ? 'Riwayat Project' : 'Semua Project';
   const periodLabel = `${baseLabel}${buildPeriodLabel(filter)}`;
 
-  pdfHeader(doc, periodLabel);
+  pdfHeader(doc, periodLabel, margin.left);
 
   let cursorY = 38;
   const table = (title, list, fillColor, emptyMessage) => {
