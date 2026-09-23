@@ -105,6 +105,33 @@ describe('cellText', () => {
   });
 });
 
+describe('paymentDay column', () => {
+  const col = PROJECT_COLUMNS.find((c) => c.key === 'paymentDay');
+
+  it('exists, is off by default (Excel keeps the same 13 defaults as the PDF), and is not sensitive', () => {
+    expect(col).toBeDefined();
+    expect(defaultKeys(PROJECT_COLUMNS)).not.toContain('paymentDay');
+    expect(col.sensitive).toBeFalsy();
+  });
+
+  it('returns the day as a number when present, and "" when missing, zero, or non-numeric', () => {
+    expect(col.value({ paymentDayOfMonth: 25 }, ctx)).toBe(25);
+    expect(col.value({}, ctx)).toBe('');
+    expect(col.value({ paymentDayOfMonth: 0 }, ctx)).toBe('');
+    expect(col.value({ paymentDayOfMonth: 'abc' }, ctx)).toBe('');
+  });
+
+  it('sits between duration and principal in registry order (report column order matters)', () => {
+    const picked = pickColumns(PROJECT_COLUMNS, PROJECT_COLUMNS.map((c) => c.key));
+    const keys = picked.map((c) => c.key);
+    const durationIdx = keys.indexOf('duration');
+    const paymentDayIdx = keys.indexOf('paymentDay');
+    const principalIdx = keys.indexOf('principal');
+    expect(paymentDayIdx).toBe(durationIdx + 1);
+    expect(principalIdx).toBe(paymentDayIdx + 1);
+  });
+});
+
 describe('cellText keeps PDF text in sync with the Excel value for currency columns', () => {
   const byKey = (k) => PROJECT_COLUMNS.find((c) => c.key === k);
   // A truthy but non-numeric field, as a legacy or hand-edited Firestore

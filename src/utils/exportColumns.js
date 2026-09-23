@@ -57,6 +57,16 @@ export const PROJECT_COLUMNS = [
   { key: 'duration', label: 'Durasi (bulan)', defaultOn: true, width: 14, align: 'right',
     value: (p) => Number(p.durationMonths) || 0,
     text: (p) => `${Number(p.durationMonths) || 0} bln` },
+  // Restores the `Hari Pembayaran` column the pre-registry Excel export always
+  // had. Off by default (Excel now shares the PDF's 13 defaults) — tick it in.
+  // Legacy documents can lack paymentDayOfMonth entirely (see the fallback in
+  // projectEndFromDuration), so a missing or non-positive value renders blank
+  // rather than a misleading 0.
+  { key: 'paymentDay', label: 'Hari Pembayaran', defaultOn: false, width: 18, align: 'right',
+    value: (p) => {
+      const day = Number(p.paymentDayOfMonth);
+      return Number.isFinite(day) && day > 0 ? day : '';
+    } },
   { key: 'principal', label: 'Nilai Project', defaultOn: false, width: 24, align: 'right',
     value: (p) => Number(p.principalAmount) || 0,
     text: (p) => formatCurrency(Number(p.principalAmount) || 0) },
