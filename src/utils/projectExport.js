@@ -232,35 +232,23 @@ function collectionRows(projects, filter) {
   return rows;
 }
 
-export function exportCollectionToExcel(projects, accounts, filter = null) {
+export function exportCollectionToExcel(projects, accounts, filter = null, columnKeys = null) {
   const rows = collectionRows(projects, filter);
+  const picked = pickColumns(COLLECTION_COLUMNS, columnKeys);
   const wb = XLSX.utils.book_new();
   const sheet = XLSX.utils.json_to_sheet(
-    rows.map((r) => ({
-      'Jatuh Tempo': r.dueStr,
-      Pemilik: r.owner,
-      Project: r.project,
-      'No. HP': r.phone,
-      Alamat: r.address,
-      Agunan: r.collateral,
-      'Mulai Proyek': r.startStr,
-      'Durasi (bln)': r.durasi,
-      'Berakhir Proyek': r.endStr,
-      Jenis: r.jenis,
-      'Nominal Tagihan': r.amount,
-      Status: r.status,
-      'Tgl Bayar': r.paidStr,
-    }))
+    rows.map((r) => {
+      const out = {};
+      picked.forEach((c) => { out[c.label] = cellValue(c, r, {}); });
+      return out;
+    })
   );
-  sheet['!cols'] = [
-    { wch: 14 }, { wch: 20 }, { wch: 24 }, { wch: 16 }, { wch: 32 },
-    { wch: 26 }, { wch: 14 }, { wch: 11 }, { wch: 15 }, { wch: 12 }, { wch: 16 }, { wch: 10 }, { wch: 14 },
-  ];
+  sheet['!cols'] = picked.map((c) => ({ wch: Math.max(10, Math.round(c.width * 0.9)) }));
   XLSX.utils.book_append_sheet(wb, sheet, 'Daftar Tagihan');
   XLSX.writeFile(wb, `Pusat Gadai Madiun_Tagihan_${downloadFilenameStamp()}.xlsx`);
 }
 
-export function exportCollectionToPdf(projects, accounts, filter = null) {
+export function exportCollectionToPdf(projects, accounts, filter = null, columnKeys = null) {
   const rows = collectionRows(projects, filter);
   const doc = new jsPDF({ orientation: 'landscape' });
   doc.setFontSize(16);
@@ -274,16 +262,12 @@ export function exportCollectionToPdf(projects, accounts, filter = null) {
   doc.text(`Periode jatuh tempo: ${periodStr}`, 14, 22);
   doc.text(`Dicetak: ${formatDate(new Date())}`, 14, 27);
 
-  const head = [[
-    'Jatuh Tempo', 'Pemilik', 'Project', 'No. HP', 'Alamat', 'Agunan',
-    'Mulai', 'Durasi', 'Berakhir', 'Jenis', 'Nominal', 'Status',
-  ]];
+  const picked = pickColumns(COLLECTION_COLUMNS, columnKeys);
+  const { columnStyles } = pdfLayout(picked);
+  const head = [picked.map((c) => c.label)];
   const body = rows.length
-    ? rows.map((r) => [
-        r.dueStr, r.owner, r.project, r.phone, r.address, r.collateral,
-        r.startStr, r.durasiStr, r.endStr, r.jenis, formatCurrency(r.amount), r.status,
-      ])
-    : [['—', 'Tidak ada tagihan pada periode ini', '', '', '', '', '', '', '', '', '', '']];
+    ? rows.map((r) => picked.map((c) => cellText(c, r, {})))
+    : [picked.map((c, i) => (i === 0 ? '—' : i === 1 ? 'Tidak ada tagihan pada periode ini' : ''))];
 
   autoTable(doc, {
     head,
@@ -292,21 +276,7 @@ export function exportCollectionToPdf(projects, accounts, filter = null) {
     margin: { left: 6, right: 6 },
     styles: { fontSize: 8, cellPadding: 2, valign: 'middle', overflow: 'linebreak' },
     headStyles: { fillColor: [45, 74, 107], textColor: 248 },
-    // All columns fixed except Alamat (index 4), which flexes to fill the full
-    // page width so there is no empty space on the right.
-    columnStyles: {
-      0: { cellWidth: 20 },
-      1: { cellWidth: 32 },
-      2: { cellWidth: 32 },
-      3: { cellWidth: 24 },
-      5: { cellWidth: 36 },
-      6: { cellWidth: 20 },
-      7: { cellWidth: 14 },
-      8: { cellWidth: 20 },
-      9: { cellWidth: 18 },
-      10: { cellWidth: 27, halign: 'right' },
-      11: { cellWidth: 14 },
-    },
+    columnStyles,
     didParseCell: (data) => {
       const r = rows[data.row.index];
       if (data.section === 'body' && r && r.status === 'Belum') {
