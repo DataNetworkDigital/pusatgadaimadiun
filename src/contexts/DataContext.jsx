@@ -11,6 +11,9 @@ import { normalizeProject } from '../utils/normalizeProject';
 import { hasAnyReceipt, isSettled, projectReceivedTotal } from '../utils/paymentStatus';
 import { generateProjectSchedule, recomputeUnpaidSchedule } from '../utils/projectSchedule';
 import { notifyTelegram, syncToDanaTrack } from '../utils/telegram';
+import { allocateReceipt } from '../utils/allocation';
+import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
+import { formatCurrency } from '../utils/formatCurrency';
 
 const DataContext = createContext(null);
 
@@ -585,65 +588,120 @@ export function DataProvider({ children }) {
     toast('Project tersimpan');
   }
 
-  async function recordProjectPayment(projectId, paymentNo, { accountId, amount, date }) {
+  // One arrival of money: allocated across the tagihan it covers, oldest first,
+  // and stored as a receipt that carries its own transaction.
+  async function recordReceipt(projectId, { amount, date, account, startNo = null }) {
     const project = projects.find((p) => p.id === projectId);
     if (!project) throw new Error('Project tidak ditemukan');
-    const payment = (project.payments || []).find((p) => p.no === paymentNo);
-    if (!payment) throw new Error('Pembayaran tidak ditemukan');
-    if (payment.receivedAmount != null) throw new Error('Pembayaran sudah dikonfirmasi');
-    const amt = Number(amount);
+    const amt = Math.round(Number(amount) || 0);
     if (amt <= 0) throw new Error('Jumlah harus lebih dari 0');
-    if (!accountId) throw new Error('Pilih rekening tujuan');
+    if (!account) throw new Error('Pilih rekening tujuan');
+
+    const { allocations, leftover } = allocateReceipt(project, amt, startNo);
+    if (!allocations.length) {
+      throw new Error('Tidak ada tagihan yang masih terbuka untuk dibayar');
+    }
+    if (leftover > 0) {
+      throw new Error(`Jumlah melebihi sisa tagihan sebesar ${formatCurrency(leftover)}`);
+    }
 
     const recvDate = date instanceof Date ? date : new Date();
     const batch = writeBatch(db);
-    const txRef = doc(collection(db, C('transactions')));
 
+    // 'cash' means Tunai. Use the Kas account when the owner has one, otherwise
+    // create it here, so cash on hand still counts in the dashboard total.
+    let accountId = account;
+    if (account === 'cash') {
+      const existing = findCashAccount(accounts);
+      if (existing) {
+        accountId = existing.id;
+        batch.update(doc(db, C('accounts'), accountId), {
+          balance: increment(amt),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const accRef = doc(collection(db, C('accounts')));
+        accountId = accRef.id;
+        batch.set(accRef, {
+          name: CASH_ACCOUNT_NAME,
+          accountNumber: '',
+          kind: 'cash',
+          balance: amt,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } else {
+      batch.update(doc(db, C('accounts'), accountId), {
+        balance: increment(amt),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    const txRef = doc(collection(db, C('transactions')));
+    const months = allocations.map((a) => a.no).join(', ');
     batch.set(txRef, {
       type: 'income',
       amount: amt,
-      description:
-        payment.type === 'final'
-          ? `Pelunasan project: ${project.name}`
-          : `Return bulanan project: ${project.name}`,
+      description: `Pembayaran project: ${project.name} (bln ${months})`,
       date: Timestamp.fromDate(recvDate),
       fromAccount: null,
       toAccount: accountId,
       debtId: null,
       projectId,
-      paymentNo,
+      paymentNo: allocations[0].no,
+      receiptId: txRef.id,
       createdAt: serverTimestamp(),
     });
-    batch.update(doc(db, C('accounts'), accountId), {
-      balance: increment(amt),
-      updatedAt: serverTimestamp(),
+
+    const receipt = {
+      id: txRef.id,
+      amount: amt,
+      date: Timestamp.fromDate(recvDate),
+      accountId,
+      transactionId: txRef.id,
+      allocations,
+    };
+
+    // MUST spread the existing receipts, never write [receipt] alone.
+    // project.receipts already holds the entries derived from rows confirmed
+    // before this feature existed, because DataContext normalizes on read.
+    // Writing only the new one would store a receipts array that omits them,
+    // and since the reader switches to the receipts branch as soon as that
+    // array exists, every one of those older payments would read as unpaid.
+    const receipts = [...(project.receipts || []), receipt];
+
+    // Keep the per-row fields in step: the received date is still read directly
+    // when a row is rendered and in the collector's Tgl Bayar column.
+    const byNo = new Map(allocations.map((a) => [a.no, a.amount]));
+    const updatedPayments = (project.payments || []).map((row) => {
+      const add = byNo.get(row.no);
+      if (add == null) return row;
+      return {
+        ...row,
+        receivedAmount: (Number(row.receivedAmount) || 0) + add,
+        receivedDate: Timestamp.fromDate(recvDate),
+        transactionId: txRef.id,
+        accountId,
+      };
     });
 
-    const updatedPayments = (project.payments || []).map((p) =>
-      p.no === paymentNo
-        ? {
-            ...p,
-            receivedAmount: amt,
-            receivedDate: Timestamp.fromDate(recvDate),
-            transactionId: txRef.id,
-            accountId,
-          }
-        : p
-    );
-    // Normalize first: on a locally built array the waiver for an
-    // under-confirmed row is what keeps this answering as it does today.
-    const afterWrite = normalizeProject({ payments: updatedPayments });
-    const allPaid =
-      afterWrite.payments.length > 0 && afterWrite.payments.every((row) => isSettled(afterWrite, row));
-    const update = { payments: updatedPayments };
-    if (allPaid && project.status === 'active') {
+    const after = { ...project, payments: updatedPayments, receipts };
+    const allSettled =
+      updatedPayments.length > 0 && updatedPayments.every((row) => isSettled(after, row));
+    const update = { payments: updatedPayments, receipts };
+    if (allSettled && project.status === 'active') {
       update.status = 'completed';
       update.closedAt = Timestamp.fromDate(recvDate);
     }
     batch.update(doc(db, C('projects'), projectId), update);
 
     await batch.commit();
-    toast(payment.type === 'final' ? 'Pelunasan project tercatat' : 'Pembayaran tercatat');
+    toast(
+      allocations.length > 1
+        ? `Pembayaran tercatat untuk ${allocations.length} tagihan`
+        : 'Pembayaran tercatat'
+    );
   }
 
   // Edit an already-received payment. Re-syncs the recorded income transaction
@@ -658,6 +716,28 @@ export function DataProvider({ children }) {
     const newAmt = Number(amount);
     if (newAmt <= 0) throw new Error('Jumlah harus lebih dari 0');
     if (!accountId) throw new Error('Pilih rekening tujuan');
+
+    // A row can now hold several arrivals. Editing one of them is Bagian B3;
+    // here we handle the ordinary case of a row paid exactly once, and say so
+    // plainly when we cannot.
+    const rowReceipts = (project.receipts || []).filter((r) =>
+      (r.allocations || []).some((a) => a.no === paymentNo)
+    );
+    if (rowReceipts.length > 1) {
+      throw new Error(
+        'Pembayaran ini terdiri dari beberapa kali bayar. Mengubahnya satu per satu akan hadir di pembaruan berikutnya.'
+      );
+    }
+    const target = rowReceipts[0] || null;
+    // That one receipt can still be a spillover that also pays a different
+    // row (allocateReceipt splits a single arrival across several tagihan).
+    // Rewriting its allocations down to just this row would silently erase
+    // the other row's share of the same money. Same deferral as above.
+    if (target && (target.allocations || []).length > 1) {
+      throw new Error(
+        'Pembayaran ini bagian dari satu setoran yang juga menutup tagihan lain. Mengubahnya akan hadir di pembaruan berikutnya.'
+      );
+    }
 
     const oldAmt = Number(payment.receivedAmount) || 0;
     const oldAccountId = payment.accountId;
@@ -705,7 +785,21 @@ export function DataProvider({ children }) {
         ? { ...p, receivedAmount: newAmt, receivedDate: Timestamp.fromDate(recvDate), accountId }
         : p
     );
-    batch.update(doc(db, C('projects'), projectId), { payments: updatedPayments });
+    const updatedReceipts = (project.receipts || []).map((r) =>
+      target && r.id === target.id
+        ? {
+            ...r,
+            amount: newAmt,
+            date: Timestamp.fromDate(recvDate),
+            accountId,
+            allocations: [{ no: paymentNo, amount: newAmt }],
+          }
+        : r
+    );
+    batch.update(doc(db, C('projects'), projectId), {
+      payments: updatedPayments,
+      receipts: updatedReceipts,
+    });
 
     await batch.commit();
     toast('Pembayaran diperbarui');
@@ -890,7 +984,7 @@ export function DataProvider({ children }) {
     addTransaction, updateTransaction, deleteTransaction,
     addDebt, updateDebt, deleteDebt, payInstallment,
     addReminder, updateReminder, deleteReminder,
-    addProject, updateProject, recordProjectPayment, updateProjectPayment, closeProjectAsDefault, settleProjectEarly, deleteProject,
+    addProject, updateProject, recordReceipt, updateProjectPayment, closeProjectAsDefault, settleProjectEarly, deleteProject,
     resetAllData,
   };
 

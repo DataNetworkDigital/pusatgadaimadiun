@@ -7,6 +7,7 @@ import SectionTitle from '../common/SectionTitle';
 import Pill from '../common/Pill';
 import ConfirmDialog from '../common/ConfirmDialog';
 import PaymentConfirmSheet from './PaymentConfirmSheet';
+import ReceiptSheet from './ReceiptSheet';
 import CloseProjectSheet from './CloseProjectSheet';
 import SettleProjectSheet from './SettleProjectSheet';
 import ProjectForm from './ProjectForm';
@@ -43,7 +44,7 @@ function StatRow({ label, value, valueClass = 'text-ink', isLast }) {
   );
 }
 
-function PaymentRow({ project, payment, onConfirm, onEdit, editable, isLast }) {
+function PaymentRow({ project, payment, onReceive, onEdit, editable, isLast }) {
   const due = toDate(payment.dueDate);
   const recv = toDate(payment.receivedDate);
   const isPaid = isSettled(project, payment);
@@ -94,7 +95,7 @@ function PaymentRow({ project, payment, onConfirm, onEdit, editable, isLast }) {
         {!isPaid && (
           <button
             type="button"
-            onClick={() => onConfirm(payment)}
+            onClick={() => onReceive(payment)}
             className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70"
           >
             Konfirmasi →
@@ -118,9 +119,10 @@ export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDemo } = useDemo();
-  const { projects, accounts, recordProjectPayment, updateProjectPayment, closeProjectAsDefault, settleProjectEarly, deleteProject, updateProject } =
+  const { projects, accounts, recordReceipt, updateProjectPayment, closeProjectAsDefault, settleProjectEarly, deleteProject, updateProject } =
     useData();
   const [paying, setPaying] = useState(null);
+  const [receiving, setReceiving] = useState(null); // the tagihan number, or null when closed
   const [closing, setClosing] = useState(false);
   const [settling, setSettling] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -161,11 +163,11 @@ export default function ProjectDetail() {
 
   async function handleConfirmPayment(data) {
     if (!paying) return;
-    if (rowReceived(project, paying) > 0) {
-      await updateProjectPayment(project.id, paying.no, data);
-    } else {
-      await recordProjectPayment(project.id, paying.no, data);
-    }
+    await updateProjectPayment(project.id, paying.no, data);
+  }
+
+  async function handleReceipt(data) {
+    await recordReceipt(project.id, data);
   }
 
   async function handleClose(data) {
@@ -326,7 +328,7 @@ export default function ProjectDetail() {
             key={p.no}
             project={project}
             payment={p}
-            onConfirm={(pay) => isActive && setPaying(pay)}
+            onReceive={(pay) => isActive && setReceiving(pay.no)}
             onEdit={(pay) => (isActive || isCompleted) && setPaying(pay)}
             editable={isActive || isCompleted}
             isLast={i === project.payments.length - 1}
@@ -388,6 +390,14 @@ export default function ProjectDetail() {
         payment={paying}
         accounts={accounts}
         onConfirm={handleConfirmPayment}
+      />
+      <ReceiptSheet
+        open={receiving !== null}
+        onClose={() => setReceiving(null)}
+        project={project}
+        accounts={accounts}
+        defaultNo={receiving}
+        onSubmit={handleReceipt}
       />
       <CloseProjectSheet
         open={closing}
