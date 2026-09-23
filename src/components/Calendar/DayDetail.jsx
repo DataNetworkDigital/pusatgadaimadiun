@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { formatDate, isSameDay, toDate } from '../../utils/formatDate';
-import { isSettled } from '../../utils/paymentStatus';
+import { isSettled, rowReceived, rowRemaining } from '../../utils/paymentStatus';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { useDemo } from '../../contexts/DemoContext';
 import Card from '../common/Card';
@@ -75,6 +75,7 @@ export default function DayDetail({
               </div>
               <div className="text-[13px] text-ink-mute mt-0.5">
                 {payment.type === 'final' ? 'Pelunasan' : `Return bulan ${payment.no}`}
+                {rowReceived(project, payment) > 0 ? ' · sisa tagihan' : ''}
               </div>
             </div>
             <div className="text-right">
@@ -82,7 +83,7 @@ export default function DayDetail({
                 className="font-num text-[16px] font-semibold text-indigo whitespace-nowrap"
                 style={{ fontVariantNumeric: 'tabular-nums' }}
               >
-                {formatCurrency(payment.expectedAmount, false)}
+                {formatCurrency(rowRemaining(project, payment), false)}
               </div>
             </div>
             <IcChevronRight size={16} stroke="#8B7558" className="flex-shrink-0" />

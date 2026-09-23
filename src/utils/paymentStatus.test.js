@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   rowReceived, rowWaived, rowDue, rowRemaining, rowState,
   isSettled, isOverdue, projectReceivedTotal, hasAnyReceipt,
+  isShort, receivedWithin,
 } from './paymentStatus';
 import { generateProjectSchedule } from './projectSchedule';
 
@@ -271,5 +272,71 @@ describe('generateProjectSchedule produces a numeric no', () => {
     for (const p of schedule) {
       expect(typeof p.no).toBe('number');
     }
+  });
+});
+
+// A tagihan that has started being paid but is not due yet is not short: the
+// borrower is early, not behind. Only screens that warn read isShort.
+describe('isShort', () => {
+  const today = new Date(2026, 8, 23);
+  const part = (dueDate) => {
+    const r = row({ dueDate });
+    return { r, p: withReceipts([r], [{ id: 'a', amount: 1_500_000, allocations: [{ no: 1, amount: 1_500_000 }] }]) };
+  };
+
+  it('is true for a partly paid tagihan that is already due', () => {
+    const { r, p } = part(new Date(2026, 8, 5));
+    expect(isShort(p, r, today)).toBe(true);
+  });
+
+  it('is true on the due date itself', () => {
+    const { r, p } = part(new Date(2026, 8, 23));
+    expect(isShort(p, r, today)).toBe(true);
+  });
+
+  it('is false for a tagihan paid partly ahead of its due date', () => {
+    const { r, p } = part(new Date(2026, 9, 5));
+    expect(isShort(p, r, today)).toBe(false);
+  });
+
+  it('is false when nothing has been paid, or everything has', () => {
+    const untouched = row({ dueDate: new Date(2026, 8, 5) });
+    expect(isShort(withReceipts([untouched], []), untouched, today)).toBe(false);
+    const full = row({ dueDate: new Date(2026, 8, 5) });
+    const p = withReceipts([full], [{ id: 'a', amount: 5_500_000, allocations: [{ no: 1, amount: 5_500_000 }] }]);
+    expect(isShort(p, full, today)).toBe(false);
+  });
+});
+
+// Money counted by the day it arrived, not by the day its tagihan was last
+// paid. The spec's own example: 3jt on 5 Okt and 1jt on 6 Okt for bulan 3,
+// then 7jt on 5 Nov that finishes bulan 3 and pays bulan 4.
+describe('receivedWithin', () => {
+  const r3 = row({ no: 3 });
+  const r4 = row({ no: 4 });
+  const p = withReceipts([r3, r4], [
+    { id: 'a', amount: 3_000_000, date: new Date(2026, 9, 5), allocations: [{ no: 3, amount: 3_000_000 }] },
+    { id: 'b', amount: 1_000_000, date: new Date(2026, 9, 6), allocations: [{ no: 3, amount: 1_000_000 }] },
+    {
+      id: 'c', amount: 7_000_000, date: new Date(2026, 10, 5),
+      allocations: [{ no: 3, amount: 1_500_000 }, { no: 4, amount: 5_500_000 }],
+    },
+  ]);
+  const month = (m) => (d) => d.getFullYear() === 2026 && d.getMonth() === m;
+
+  it('puts each arrival in the month it arrived', () => {
+    expect(receivedWithin(p, month(9))).toEqual({ amount: 4_000_000, count: 2 });
+    expect(receivedWithin(p, month(10))).toEqual({ amount: 7_000_000, count: 1 });
+  });
+
+  it('reads a project stored before receipts existed from its rows', () => {
+    const paid = row({ receivedAmount: 5_500_000, receivedDate: new Date(2026, 9, 5) });
+    expect(receivedWithin(legacy([paid]), month(9))).toEqual({ amount: 5_500_000, count: 1 });
+    expect(receivedWithin(legacy([paid]), month(10))).toEqual({ amount: 0, count: 0 });
+  });
+
+  it('skips arrivals without a date', () => {
+    const q = withReceipts([r3], [{ id: 'a', amount: 1_000_000, date: null, allocations: [{ no: 3, amount: 1_000_000 }] }]);
+    expect(receivedWithin(q, () => true)).toEqual({ amount: 0, count: 0 });
   });
 });

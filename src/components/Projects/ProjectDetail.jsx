@@ -14,7 +14,7 @@ import ProjectForm from './ProjectForm';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { projectSummary } from '../../utils/projectSchedule';
-import { isSettled, rowReceived, rowRemaining, rowState } from '../../utils/paymentStatus';
+import { isSettled, isShort, rowReceived, rowRemaining, rowState } from '../../utils/paymentStatus';
 import {
   IcChevronLeft,
   IcCalendar,
@@ -57,6 +57,13 @@ function PaymentRow({ project, payment, onReceive, onEdit, editable, isLast }) {
   const arrivals = (project.receipts || [])
     .map((r) => ({ r, part: (r.allocations || []).find((a) => a.no === payment.no) }))
     .filter((x) => x.part);
+  // Edit handles a tagihan paid by one arrival that paid nothing else;
+  // updateProjectPayment refuses the other shapes until B3, so the button
+  // should not be offered for them.
+  const editableShape = arrivals.length <= 1 && (arrivals[0]?.r.allocations || []).length <= 1;
+  // A settled tagihan already shows its arrival on its own line. A partly paid
+  // one shows it nowhere else, so list it even when there is only one.
+  const showArrivals = arrivals.length > 1 || (arrivals.length === 1 && !isPaid);
 
   // The row's own border-b lives on this outer wrapper, not on the flex row
   // below, so it falls after the arrivals list instead of cutting between a
@@ -84,7 +91,12 @@ function PaymentRow({ project, payment, onReceive, onEdit, editable, isLast }) {
             {isFinal && <Pill tone="indigo">Pelunasan</Pill>}
             {overdue && <Pill tone="terra">Telat</Pill>}
             {dueSoon && !overdue && <Pill tone="emas">Segera</Pill>}
-            {state === 'kurang' && <Pill tone="emas">Kurang {formatCurrency(short, false)}</Pill>}
+            {state === 'kurang' &&
+              (isShort(project, payment) ? (
+                <Pill tone="emas">Kurang {formatCurrency(short, false)}</Pill>
+              ) : (
+                <Pill tone="neutral">Sisa {formatCurrency(short, false)}</Pill>
+              ))}
           </div>
           <div className="text-[12px] text-ink-mute mt-0.5">
             {isPaid
@@ -110,7 +122,7 @@ function PaymentRow({ project, payment, onReceive, onEdit, editable, isLast }) {
               Konfirmasi →
             </button>
           )}
-          {isPaid && editable && arrivals.length <= 1 && (
+          {isPaid && editable && editableShape && (
             <button
               type="button"
               onClick={() => onEdit(payment)}
@@ -121,7 +133,7 @@ function PaymentRow({ project, payment, onReceive, onEdit, editable, isLast }) {
           )}
         </div>
       </div>
-      {arrivals.length > 1 && (
+      {showArrivals && (
         <div className="pb-2 pl-12 space-y-0.5">
           {arrivals.map(({ r, part }) => (
             <div key={r.id} className="flex justify-between text-[12px] text-ink-mute">

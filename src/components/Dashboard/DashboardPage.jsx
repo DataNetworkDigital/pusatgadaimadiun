@@ -9,7 +9,7 @@ import Card from '../common/Card';
 import { startOfMonth, endOfMonth, toDate, daysBetween, MONTHS_SHORT } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { projectSummary } from '../../utils/projectSchedule';
-import { isSettled } from '../../utils/paymentStatus';
+import { isSettled, rowRemaining } from '../../utils/paymentStatus';
 import { IcAlert, IcChevronRight, IcSwap, IcWallet, IcLedger, IcBriefcase } from '../common/icons';
 
 function DueBanner({ count, total, isOverdue, to }) {
@@ -131,8 +131,8 @@ export default function DashboardPage() {
       (p.payments || []).forEach((pay) => {
         if (isSettled(p, pay)) return;
         const days = daysBetween(now, toDate(pay.dueDate));
-        if (days < 0) o.push({ kind: 'project', amount: pay.expectedAmount || 0 });
-        else if (days <= 7) s.push({ kind: 'project', amount: pay.expectedAmount || 0 });
+        if (days < 0) o.push({ kind: 'project', amount: rowRemaining(p, pay) });
+        else if (days <= 7) s.push({ kind: 'project', amount: rowRemaining(p, pay) });
       });
     });
     return { overdue: o, dueSoon: s };

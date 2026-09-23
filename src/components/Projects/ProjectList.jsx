@@ -11,7 +11,7 @@ import ExportSheet from './ExportSheet';
 import PeriodPickerSheet, { resolvePeriod } from './PeriodPickerSheet';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { projectSummary } from '../../utils/projectSchedule';
-import { rowReceived, isSettled } from '../../utils/paymentStatus';
+import { isSettled, receivedWithin, rowRemaining } from '../../utils/paymentStatus';
 import {
   exportProjectsToExcel,
   exportProjectsToPdf,
@@ -97,18 +97,17 @@ export default function ProjectList() {
     let received = 0;
     let pending = 0;
     let receivedCount = 0;
+    const inRange = (d) => (!range.from || d >= range.from) && (!range.to || d <= range.to);
     projects.forEach((p) => {
+      // Counted per arrival on the day it arrived, so a tagihan paid in two
+      // months shows up in both.
+      const got = receivedWithin(p, inRange);
+      received += got.amount;
+      receivedCount += got.count;
       (p.payments || []).forEach((pay) => {
         const due = toDate(pay.dueDate);
-        const recv = toDate(pay.receivedDate);
-        const inRangeRecv = recv && (!range.from || recv >= range.from) && (!range.to || recv <= range.to);
-        const inRangeDue = due && (!range.from || due >= range.from) && (!range.to || due <= range.to);
-        if (inRangeRecv) {
-          received += rowReceived(p, pay);
-          receivedCount += 1;
-        }
-        if (inRangeDue && !isSettled(p, pay)) {
-          pending += pay.expectedAmount || 0;
+        if (due && inRange(due) && !isSettled(p, pay)) {
+          pending += rowRemaining(p, pay);
         }
       });
     });

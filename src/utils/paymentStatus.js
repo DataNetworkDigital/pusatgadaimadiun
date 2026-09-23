@@ -1,4 +1,5 @@
 import { toDate } from './formatDate';
+import { normalizeProject } from './normalizeProject';
 
 /**
  * The single answer to "is this tagihan settled, and how much is still owed".
@@ -101,6 +102,16 @@ export function rowState(project, row) {
   return rowReceived(project, row) > 0 ? 'kurang' : 'belum';
 }
 
+// Partly paid AND due: the case the owner should chase. A tagihan paid partly
+// ahead of its due date is in state 'kurang' too, but there the borrower is
+// early, not behind, so warnings (the card badge, the Kurang pill, Kurang in
+// the collector's list) read this instead of rowState.
+export function isShort(project, row, today = new Date()) {
+  if (rowState(project, row) !== 'kurang') return false;
+  const due = toDate(row?.dueDate);
+  return !!due && due <= today;
+}
+
 export function isOverdue(project, row, today = new Date()) {
   if (isSettled(project, row)) return false;
   const due = toDate(row?.dueDate);
@@ -111,6 +122,24 @@ export function projectReceivedTotal(project) {
   const receipts = receiptsOf(project);
   if (receipts) return receipts.reduce((s, r) => s + (Number(r?.amount) || 0), 0);
   return (project?.payments || []).reduce((s, p) => s + (Number(p?.receivedAmount) || 0), 0);
+}
+
+// Money that arrived inside a period, counted per arrival on the day it
+// arrived. A tagihan paid in two instalments in two months belongs partly to
+// each; reading the row's last payment date instead would move the first
+// instalment into the later month after the fact.
+// `inRange` receives the arrival's date as a Date.
+export function receivedWithin(project, inRange) {
+  const receipts = receiptsOf(project) || normalizeProject(project)?.receipts || [];
+  let amount = 0;
+  let count = 0;
+  for (const r of receipts) {
+    const d = toDate(r?.date);
+    if (!d || !inRange(d)) continue;
+    amount += Number(r?.amount) || 0;
+    count += 1;
+  }
+  return { amount, count };
 }
 
 export function hasAnyReceipt(project) {

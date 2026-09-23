@@ -4,7 +4,7 @@ import autoTable from 'jspdf-autotable';
 import { formatCurrency } from './formatCurrency';
 import { formatDate, MONTHS, toDate } from './formatDate';
 import { projectSummary, projectEndFromDuration } from './projectSchedule';
-import { isSettled, rowRemaining, rowReceived } from './paymentStatus';
+import { isSettled, isShort, receivedWithin, rowRemaining, rowReceived } from './paymentStatus';
 import { PROJECT_COLUMNS, COLLECTION_COLUMNS, pickColumns, cellValue, cellText, pdfLayout } from './exportColumns';
 
 export function projectSheetRows(list, picked, accountName) {
@@ -18,6 +18,14 @@ export function projectSheetRows(list, picked, accountName) {
 
 function sheetColWidths(picked) {
   return picked.map((c) => ({ wch: Math.max(10, Math.round(c.width * 0.9)) }));
+}
+
+// Kurang is a warning, so it is kept for tagihan already due; a tagihan paid
+// partly ahead of its due date reads Sebagian. Both still count as not paid.
+function paymentStatusLabel(p, pay, paidLabel) {
+  if (isSettled(p, pay)) return paidLabel;
+  if (rowReceived(p, pay) > 0) return isShort(p, pay) ? 'Kurang' : 'Sebagian';
+  return 'Belum';
 }
 
 function paymentRow(p, payment, accountName) {
@@ -36,7 +44,7 @@ function paymentRow(p, payment, accountName) {
     'Diterima (Rp)': rowReceived(p, payment) > 0 ? rowReceived(p, payment) : '',
     'Tanggal Diterima': payment.receivedDate ? formatDate(payment.receivedDate) : '',
     'Rekening Tujuan': accountName(payment.accountId),
-    Status: isSettled(p, payment) ? 'Diterima' : 'Belum',
+    Status: paymentStatusLabel(p, payment, 'Diterima'),
   };
 }
 
@@ -176,14 +184,11 @@ export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = n
   const totalDisbursed = sourceList.reduce((s, p) => s + (p.disbursedAmount || 0), 0);
   let totalReceived = sourceList.reduce((s, p) => s + projectSummary(p).receivedSoFar, 0);
   if (filter) {
-    totalReceived = 0;
-    sourceList.forEach((p) => {
-      (p.payments || []).forEach((pay) => {
-        if (pay.receivedDate && inDateRange(pay.receivedDate, filter)) {
-          totalReceived += rowReceived(p, pay);
-        }
-      });
-    });
+    // Per arrival, on the day it arrived; see receivedWithin.
+    totalReceived = sourceList.reduce(
+      (s, p) => s + receivedWithin(p, (d) => inDateRange(d, filter)).amount,
+      0
+    );
   }
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
@@ -229,7 +234,7 @@ function collectionRows(projects, filter) {
         dueStr: formatDate(pay.dueDate),
         jenis: pay.type === 'final' ? 'Pelunasan' : 'Cicilan',
         amount: paid ? rowReceived(p, pay) : rowRemaining(p, pay),
-        status: paid ? 'Lunas' : rowReceived(p, pay) > 0 ? 'Kurang' : 'Belum',
+        status: paymentStatusLabel(p, pay, 'Lunas'),
         paidStr: pay.receivedDate ? formatDate(pay.receivedDate) : '',
       });
     });
