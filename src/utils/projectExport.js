@@ -6,7 +6,7 @@ import { formatDate, MONTHS, toDate } from './formatDate';
 import { projectSummary, projectEndFromDuration } from './projectSchedule';
 import { PROJECT_COLUMNS, COLLECTION_COLUMNS, pickColumns, cellValue, cellText, pdfLayout } from './exportColumns';
 
-function projectSheetRows(list, picked, accountName) {
+export function projectSheetRows(list, picked, accountName) {
   return list.map((p, index) => {
     const ctx = { index, accountName };
     const row = {};
@@ -115,12 +115,12 @@ function pdfHeader(doc, periodLabel) {
   doc.text(`Dicetak: ${formatDate(new Date())}`, 14, 31);
 }
 
-function projectsToPdfRows(list, picked, accountName) {
+export function projectsToPdfRows(list, picked, accountName) {
   return list.map((p, index) => picked.map((c) => cellText(c, p, { index, accountName })));
 }
 
 // Placeholder line that keeps the column count intact when a section is empty.
-function emptyPdfRow(picked, message) {
+export function emptyPdfRow(picked, message) {
   return [picked.map((c, i) => (i === 0 ? '—' : i === 1 ? message : ''))];
 }
 
