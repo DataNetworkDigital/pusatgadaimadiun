@@ -857,7 +857,10 @@ import { isSettled, rowRemaining, rowReceived } from './paymentStatus';
 with:
 
 ```js
-    'Diterima (Rp)': rowReceived(p, payment) || '',
+    // Blank when no money reached this tagihan, otherwise the amount. Written
+    // as an explicit comparison rather than `|| ''` because this is a currency
+    // cell: `||` would also blank a legitimate zero.
+    'Diterima (Rp)': rowReceived(p, payment) > 0 ? rowReceived(p, payment) : '',
 ```
 
 and replace:
@@ -1177,11 +1180,18 @@ On demo data, confirm each still shows exactly what it showed before this branch
 4. Kalender: the days marked as having a project payment due, and a day's detail list.
 5. Download a PDF and an Excel with the default columns and confirm the numbers match what the same download produced on `main`.
 
-- [ ] **Step 3: Compare against `main` rather than trusting memory**
+- [ ] **Step 3: Check the two things the characterisation net cannot catch**
+
+The net in Task 3 compares project-level totals and per-row settled/unsettled booleans. A review found two realistic regressions it structurally cannot see, so verify these by eye:
+
+1. **Money misattributed between rows of the same project**, where the project total and both rows' settled flags stay correct. Open a project whose rows were paid on different dates and check that each row shows its own amount and its own received date, not another row's.
+2. **The per-row amount shown in the Excel `Jadwal Pembayaran` sheet and on the project detail rows.** Those display `rowReceived` directly, and the net never diffs that value row by row against the stored `receivedAmount`. Compare a few rows against the same export taken from `main`.
+
+- [ ] **Step 4: Compare against `main` rather than trusting memory**
 
 Generate the same PDF from `main` (`git stash` is not needed — use a second checkout or simply note the numbers before switching) and compare the totals side by side. Any difference is a bug in this branch, not an improvement.
 
-- [ ] **Step 4: Report**
+- [ ] **Step 5: Report**
 
 Report what you compared and what matched. Do **not** merge to `main`; Bagian B1 ships together with B2 or on its own only with Gde's explicit go-ahead.
 
