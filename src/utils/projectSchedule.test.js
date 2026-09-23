@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { projectEndFromDuration, projectEndDate } from './projectSchedule';
+import {
+  projectEndFromDuration, projectEndDate, generateProjectSchedule, recomputeUnpaidSchedule,
+} from './projectSchedule';
 
 describe('projectEndFromDuration', () => {
   it('lands on the payment day, duration months after the start', () => {
@@ -77,5 +79,43 @@ describe('projectEndDate', () => {
     expect(end.getFullYear()).toBe(2026);
     expect(end.getMonth()).toBe(5); // Juni
     expect(end.getDate()).toBe(22);
+  });
+});
+
+describe('recomputeUnpaidSchedule when money has already arrived', () => {
+  const terms = (durationMonths) => ({
+    principalAmount: 100_000_000,
+    returnPctTier1: 5.5,
+    returnPctTier2: 6.5,
+    durationMonths,
+    startDate: new Date(2026, 0, 5),
+    paymentDayOfMonth: 5,
+  });
+  const withPaid = (months, paid) =>
+    generateProjectSchedule(terms(months)).map((r) =>
+      paid[r.no] != null ? { ...r, receivedAmount: paid[r.no], receivedDate: new Date(2026, r.no, 5) } : r
+    );
+
+  it('still extends a project whose paid rows are all bagi hasil', () => {
+    const rows = withPaid(3, { 1: 5_500_000, 2: 5_500_000 });
+    const next = recomputeUnpaidSchedule(rows, terms(5));
+    expect(next.map((r) => r.type)).toEqual(['interest', 'interest', 'interest', 'interest', 'final']);
+    expect(next[0].receivedAmount).toBe(5_500_000);
+    expect(next[4].expectedAmount).toBe(100_000_000);
+  });
+
+  it('refuses to extend once the pelunasan has received money', () => {
+    const rows = withPaid(3, { 1: 5_500_000, 2: 5_500_000, 3: 40_000_000 });
+    expect(() => recomputeUnpaidSchedule(rows, terms(5))).toThrow(/pelunasan \(bulan 3\)/);
+  });
+
+  it('refuses to shorten so that a paid bagi hasil becomes the pelunasan', () => {
+    const rows = withPaid(6, { 1: 5_500_000, 2: 5_500_000, 3: 5_500_000 });
+    expect(() => recomputeUnpaidSchedule(rows, terms(3))).toThrow(/bulan 3/);
+  });
+
+  it('refuses to shorten past a month that has received money', () => {
+    const rows = withPaid(6, { 1: 5_500_000, 5: 1_500_000 });
+    expect(() => recomputeUnpaidSchedule(rows, terms(4))).toThrow(/bulan 5/);
   });
 });

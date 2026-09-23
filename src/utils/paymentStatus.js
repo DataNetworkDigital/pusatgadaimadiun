@@ -90,7 +90,7 @@ function hasActivity(project, row) {
 // and rowRemaining reads that same 0 whether the row was ever touched or
 // not (see the comment on rowRemaining above). Without hasActivity, such a
 // row would read as settled the instant it is created, and
-// recordProjectPayment's allPaid check could flip an active project to
+// recordReceipt's completion check could flip an active project to
 // completed with nothing ever having been received or waived.
 export function isSettled(project, row) {
   return rowRemaining(project, row) === 0 && hasActivity(project, row);

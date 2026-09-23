@@ -78,6 +78,27 @@ export function recomputeUnpaidSchedule(existingPayments, {
     if (p.receivedAmount != null || p.closure) paidByNo.set(p.no, p);
   }
 
+  // A kept row keeps its own amount, so it must also keep its place in the
+  // schedule. Turning a paid bagi hasil into the pelunasan, or a pelunasan that
+  // money reached into a bagi hasil, would leave the principal asked for twice
+  // or not at all; a row past the new end would simply vanish with its money.
+  // Refused here until extensions arrive with Bagian C.
+  for (const [no, kept] of paidByNo) {
+    if (no > months) {
+      throw new Error(
+        `Durasi tidak bisa dipendekkan ke ${months} bulan karena bulan ${no} sudah menerima pembayaran.`
+      );
+    }
+    const type = no === months ? 'final' : 'interest';
+    if (kept.type && kept.type !== type) {
+      throw new Error(
+        type === 'final'
+          ? `Durasi tidak bisa dipendekkan ke ${months} bulan karena bulan ${no} sudah dibayar sebagai bagi hasil.`
+          : `Durasi tidak bisa diperpanjang karena pelunasan (bulan ${no}) sudah menerima pembayaran.`
+      );
+    }
+  }
+
   const payments = [];
   for (let i = 1; i <= months; i++) {
     const isLast = i === months;

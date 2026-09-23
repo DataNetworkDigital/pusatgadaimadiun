@@ -13,6 +13,8 @@ import { generateProjectSchedule, recomputeUnpaidSchedule } from '../utils/proje
 import { notifyTelegram, syncToDanaTrack } from '../utils/telegram';
 import { allocateReceipt } from '../utils/allocation';
 import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
+import { applySettlement } from '../utils/settlement';
+import { applyPaymentEdit } from '../utils/paymentEdit';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const DataContext = createContext(null);
@@ -717,37 +719,23 @@ export function DataProvider({ children }) {
     const payment = (project.payments || []).find((p) => p.no === paymentNo);
     if (!payment) throw new Error('Pembayaran tidak ditemukan');
     if (payment.receivedAmount == null) throw new Error('Pembayaran ini belum diterima');
-    const newAmt = Number(amount);
+    const newAmt = Math.round(Number(amount) || 0);
     if (newAmt <= 0) throw new Error('Jumlah harus lebih dari 0');
     if (!accountId) throw new Error('Pilih rekening tujuan');
-
-    // A row can now hold several arrivals. Editing one of them is Bagian B3;
-    // here we handle the ordinary case of a row paid exactly once, and say so
-    // plainly when we cannot.
-    const rowReceipts = (project.receipts || []).filter((r) =>
-      (r.allocations || []).some((a) => a.no === paymentNo)
-    );
-    if (rowReceipts.length > 1) {
-      throw new Error(
-        'Pembayaran ini terdiri dari beberapa kali bayar. Mengubahnya satu per satu akan hadir di pembaruan berikutnya.'
-      );
-    }
-    const target = rowReceipts[0] || null;
-    // That one receipt can still be a spillover that also pays a different
-    // row (allocateReceipt splits a single arrival across several tagihan).
-    // Rewriting its allocations down to just this row would silently erase
-    // the other row's share of the same money. Same deferral as above.
-    if (target && (target.allocations || []).length > 1) {
-      throw new Error(
-        'Pembayaran ini bagian dari satu setoran yang juga menutup tagihan lain. Mengubahnya akan hadir di pembaruan berikutnya.'
-      );
-    }
 
     const oldAmt = Number(payment.receivedAmount) || 0;
     const oldAccountId = payment.accountId;
     const recvDate = date instanceof Date
       ? date
       : (payment.receivedDate?.toDate?.() || new Date());
+
+    // Decided before anything is written: refuses the cases this stage cannot
+    // edit yet, and says what the correction does to the tagihan's status.
+    const edited = applyPaymentEdit(project, paymentNo, {
+      amount: newAmt,
+      at: Timestamp.fromDate(recvDate),
+      accountId,
+    });
 
     const batch = writeBatch(db);
 
@@ -783,30 +771,10 @@ export function DataProvider({ children }) {
       });
     }
 
-    // Update the payment record
-    const updatedPayments = (project.payments || []).map((p) =>
-      p.no === paymentNo
-        ? { ...p, receivedAmount: newAmt, receivedDate: Timestamp.fromDate(recvDate), accountId }
-        : p
-    );
-    const updatedReceipts = (project.receipts || []).map((r) =>
-      target && r.id === target.id
-        ? {
-            ...r,
-            amount: newAmt,
-            date: Timestamp.fromDate(recvDate),
-            accountId,
-            allocations: [{ no: paymentNo, amount: newAmt }],
-          }
-        : r
-    );
-    batch.update(doc(db, C('projects'), projectId), {
-      payments: updatedPayments,
-      receipts: updatedReceipts,
-    });
+    batch.update(doc(db, C('projects'), projectId), edited);
 
     await batch.commit();
-    toast('Pembayaran diperbarui');
+    toast(edited.status === 'active' ? 'Pembayaran diperbarui, project aktif lagi' : 'Pembayaran diperbarui');
   }
 
   async function closeProjectAsDefault(projectId, { recoveredAmount = 0, accountId, date } = {}) {
@@ -857,45 +825,44 @@ export function DataProvider({ children }) {
   async function settleProjectEarly(projectId, { accountId, amount, date } = {}) {
     const project = projects.find((p) => p.id === projectId);
     if (!project) throw new Error('Project tidak ditemukan');
-    const amt = Number(amount) || 0;
+    const amt = Math.round(Number(amount) || 0);
     if (amt <= 0) throw new Error('Jumlah pelunasan harus lebih dari 0');
     if (!accountId) throw new Error('Pilih rekening tujuan');
     const settleDate = date instanceof Date ? date : new Date();
+    const at = Timestamp.fromDate(settleDate);
 
     const batch = writeBatch(db);
     const creditedTo = creditMoneyIn(batch, accountId, amt);
     const txRef = doc(collection(db, C('transactions')));
+
+    // The settlement is an arrival of money like any other, so it goes into
+    // receipts; see applySettlement for what happens when it does not.
+    const { payments, receipts, settleNo } = applySettlement(project, {
+      amount: amt,
+      at,
+      accountId: creditedTo,
+      transactionId: txRef.id,
+    });
+
     batch.set(txRef, {
       type: 'income',
       amount: amt,
       description: `Pelunasan dipercepat project: ${project.name}`,
-      date: Timestamp.fromDate(settleDate),
+      date: at,
       fromAccount: null,
       toAccount: creditedTo,
       debtId: null,
       projectId,
+      paymentNo: settleNo,
+      receiptId: txRef.id,
       createdAt: serverTimestamp(),
     });
 
-    const keptPaid = (project.payments || []).filter((p) => p.receivedAmount != null || isSettled(project, p));
-    const settleNo = keptPaid.reduce((max, p) => Math.max(max, p.no || 0), 0) + 1;
-    const settlementRow = {
-      no: settleNo,
-      dueDate: Timestamp.fromDate(settleDate),
-      type: 'final',
-      expectedAmount: amt,
-      ratePct: null,
-      receivedAmount: amt,
-      receivedDate: Timestamp.fromDate(settleDate),
-      transactionId: txRef.id,
-      accountId: creditedTo,
-      settledEarly: true,
-    };
-
     batch.update(doc(db, C('projects'), projectId), {
-      payments: [...keptPaid, settlementRow],
+      payments,
+      receipts,
       status: 'completed',
-      closedAt: Timestamp.fromDate(settleDate),
+      closedAt: at,
       settledEarly: true,
     });
 
