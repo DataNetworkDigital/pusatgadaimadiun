@@ -4,6 +4,7 @@ import autoTable from 'jspdf-autotable';
 import { formatCurrency } from './formatCurrency';
 import { formatDate, MONTHS, toDate } from './formatDate';
 import { projectSummary, projectEndFromDuration } from './projectSchedule';
+import { PROJECT_COLUMNS, COLLECTION_COLUMNS, pickColumns, cellValue, cellText, pdfLayout } from './exportColumns';
 
 const STATUS_LABEL = {
   active: 'Aktif',
@@ -11,34 +12,17 @@ const STATUS_LABEL = {
   default: 'Macet',
 };
 
-function projectRow(p, accountName) {
-  const summary = projectSummary(p);
-  const startDate = p.startDate ? formatDate(p.startDate) : '';
-  const closedAt = p.closedAt ? formatDate(p.closedAt) : '';
-  return {
-    Nama: p.name,
-    Pemilik: p.ownerName || '',
-    'No. HP': p.phone || '',
-    NIK: p.nik || '',
-    Alamat: p.address || '',
-    Agunan: p.collateral || '',
-    'No. Kontrak': p.contractNumber || '',
-    Status: STATUS_LABEL[p.status] || p.status,
-    'Nilai Project': p.principalAmount,
-    'Modal Keluar': p.disbursedAmount,
-    'Return / Bulan (%)': p.monthlyReturnPct,
-    'Durasi (bulan)': p.durationMonths,
-    'Tanggal Mulai': startDate,
-    'Hari Pembayaran': p.paymentDayOfMonth,
-    'Rekening Sumber': accountName(p.sourceAccountId),
-    'Total Diterima': summary.receivedSoFar,
-    'Sisa Diharapkan': summary.expectedRemaining,
-    'Posisi Kas Bersih': summary.netCashChange,
-    'Kerugian Final': p.lossAmount || 0,
-    'Tanggal Tutup': closedAt,
-    Catatan: p.description || '',
-    'Bukti / Kontrak': p.proofUrl || '',
-  };
+function projectSheetRows(list, picked, accountName) {
+  return list.map((p, index) => {
+    const ctx = { index, accountName };
+    const row = {};
+    picked.forEach((c) => { row[c.label] = cellValue(c, p, ctx); });
+    return row;
+  });
+}
+
+function sheetColWidths(picked) {
+  return picked.map((c) => ({ wch: Math.max(10, Math.round(c.width * 0.9)) }));
 }
 
 function paymentRow(p, payment, accountName) {
@@ -54,13 +38,6 @@ function paymentRow(p, payment, accountName) {
     'Rekening Tujuan': accountName(payment.accountId),
     Status: payment.receivedAmount != null ? 'Diterima' : 'Belum',
   };
-}
-
-function fmtIdrCellArray(rows, currencyKeys) {
-  // rows is plain object array; nothing to do for the JSON conversion since
-  // numbers stay numeric. Excel still treats them as numbers — user can
-  // format the column themselves if needed.
-  return rows;
 }
 
 function downloadFilenameStamp() {
@@ -96,31 +73,26 @@ function buildPeriodLabel(filter) {
   return ` · ${fmt(filter.from)} – ${fmt(filter.to)}`;
 }
 
-export function exportProjectsToExcel(projects, accounts, filter = null) {
+export function exportProjectsToExcel(projects, accounts, filter = null, columnKeys = null) {
   const accountName = (id) => accounts.find((a) => a.id === id)?.name || '';
+  const picked = pickColumns(PROJECT_COLUMNS, columnKeys);
   const sourceList = filter ? projectsTouchedByFilter(projects, filter) : projects;
   const active = sourceList.filter((p) => p.status === 'active');
   const archive = sourceList.filter((p) => p.status === 'completed' || p.status === 'default');
 
   const wb = XLSX.utils.book_new();
+  const widths = sheetColWidths(picked);
 
-  // Sheet: Project Aktif
-  const sheetActive = XLSX.utils.json_to_sheet(active.map((p) => projectRow(p, accountName)));
-  sheetActive['!cols'] = [
-    { wch: 30 }, { wch: 20 }, { wch: 16 }, { wch: 10 },
-    { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 10 },
-    { wch: 14 }, { wch: 8 }, { wch: 18 }, { wch: 14 },
-    { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
-    { wch: 30 }, { wch: 30 },
-  ];
+  const sheetActive = XLSX.utils.json_to_sheet(projectSheetRows(active, picked, accountName));
+  sheetActive['!cols'] = widths;
   XLSX.utils.book_append_sheet(wb, sheetActive, 'Project Aktif');
 
-  // Sheet: Riwayat
-  const sheetArchive = XLSX.utils.json_to_sheet(archive.map((p) => projectRow(p, accountName)));
-  sheetArchive['!cols'] = sheetActive['!cols'];
+  const sheetArchive = XLSX.utils.json_to_sheet(projectSheetRows(archive, picked, accountName));
+  sheetArchive['!cols'] = widths;
   XLSX.utils.book_append_sheet(wb, sheetArchive, 'Riwayat');
 
-  // Sheet: Jadwal Pembayaran (filtered by receivedDate when filter set)
+  // Sheet: Jadwal Pembayaran (filtered by receivedDate when filter set).
+  // Not column-picked: it is a fixed per-payment view.
   const allPayments = [];
   sourceList.forEach((p) => {
     (p.payments || []).forEach((pay) => {
@@ -136,7 +108,6 @@ export function exportProjectsToExcel(projects, accounts, filter = null) {
   ];
   XLSX.utils.book_append_sheet(wb, sheetPayments, 'Jadwal Pembayaran');
 
-  fmtIdrCellArray(active, []);
   XLSX.writeFile(wb, `Pusat Gadai Madiun_Project_${downloadFilenameStamp()}.xlsx`);
 }
 
