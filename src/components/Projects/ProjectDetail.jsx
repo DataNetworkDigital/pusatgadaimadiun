@@ -14,7 +14,7 @@ import ProjectForm from './ProjectForm';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { projectSummary } from '../../utils/projectSchedule';
-import { isSettled, rowReceived } from '../../utils/paymentStatus';
+import { isSettled, rowReceived, rowRemaining, rowState } from '../../utils/paymentStatus';
 import {
   IcChevronLeft,
   IcCalendar,
@@ -52,65 +52,85 @@ function PaymentRow({ project, payment, onReceive, onEdit, editable, isLast }) {
   const days = due ? daysBetween(new Date(), due) : 0;
   const overdue = !isPaid && days < 0;
   const dueSoon = !isPaid && days >= 0 && days <= 7;
+  const state = rowState(project, payment);
+  const short = rowRemaining(project, payment);
+  const arrivals = (project.receipts || [])
+    .map((r) => ({ r, part: (r.allocations || []).find((a) => a.no === payment.no) }))
+    .filter((x) => x.part);
 
+  // The row's own border-b lives on this outer wrapper, not on the flex row
+  // below, so it falls after the arrivals list instead of cutting between a
+  // row and its own arrivals (confirmed in-browser: the row+arrivals need to
+  // read as one block before the next tagihan starts).
   return (
-    <div
-      className={`flex items-center gap-3 py-3 ${isLast ? '' : 'border-b border-line-soft'}`}
-    >
-      <div
-        className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
-          isPaid ? 'bg-daun text-cream' : isFinal ? 'bg-indigo text-cream' : 'bg-cream-deep text-ink-soft'
-        }`}
-      >
-        {isPaid ? (
-          <IcCheck size={18} sw={2.4} />
-        ) : (
-          <span className="text-[13px] font-display font-semibold">{payment.no}</span>
-        )}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[14px] font-semibold text-ink">
-            Pembayaran {payment.no}
-          </span>
-          {isFinal && <Pill tone="indigo">Pelunasan</Pill>}
-          {overdue && <Pill tone="terra">Telat</Pill>}
-          {dueSoon && !overdue && <Pill tone="emas">Segera</Pill>}
-        </div>
-        <div className="text-[12px] text-ink-mute mt-0.5">
-          {isPaid
-            ? `Diterima ${recv ? formatDate(recv, { short: true }) : '—'}`
-            : `Jatuh tempo ${due ? formatDate(due, { short: true }) : '—'}`}
-        </div>
-      </div>
-      <div className="text-right">
+    <div className={isLast ? '' : 'border-b border-line-soft'}>
+      <div className="flex items-center gap-3 py-3">
         <div
-          className={`font-num text-[15px] font-semibold ${
-            isPaid ? 'text-daun' : 'text-ink'
+          className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+            isPaid ? 'bg-daun text-cream' : isFinal ? 'bg-indigo text-cream' : 'bg-cream-deep text-ink-soft'
           }`}
-          style={{ fontVariantNumeric: 'tabular-nums' }}
         >
-          {formatCurrency(isPaid ? rowReceived(project, payment) : payment.expectedAmount, false)}
+          {isPaid ? (
+            <IcCheck size={18} sw={2.4} />
+          ) : (
+            <span className="text-[13px] font-display font-semibold">{payment.no}</span>
+          )}
         </div>
-        {!isPaid && (
-          <button
-            type="button"
-            onClick={() => onReceive(payment)}
-            className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70"
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[14px] font-semibold text-ink">
+              Pembayaran {payment.no}
+            </span>
+            {isFinal && <Pill tone="indigo">Pelunasan</Pill>}
+            {overdue && <Pill tone="terra">Telat</Pill>}
+            {dueSoon && !overdue && <Pill tone="emas">Segera</Pill>}
+            {state === 'kurang' && <Pill tone="emas">Kurang {formatCurrency(short, false)}</Pill>}
+          </div>
+          <div className="text-[12px] text-ink-mute mt-0.5">
+            {isPaid
+              ? `Diterima ${recv ? formatDate(recv, { short: true }) : '—'}`
+              : `Jatuh tempo ${due ? formatDate(due, { short: true }) : '—'}`}
+          </div>
+        </div>
+        <div className="text-right">
+          <div
+            className={`font-num text-[15px] font-semibold ${
+              isPaid ? 'text-daun' : 'text-ink'
+            }`}
+            style={{ fontVariantNumeric: 'tabular-nums' }}
           >
-            Konfirmasi →
-          </button>
-        )}
-        {isPaid && editable && (
-          <button
-            type="button"
-            onClick={() => onEdit(payment)}
-            className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70"
-          >
-            Edit →
-          </button>
-        )}
+            {formatCurrency(isPaid ? rowReceived(project, payment) : payment.expectedAmount, false)}
+          </div>
+          {!isPaid && (
+            <button
+              type="button"
+              onClick={() => onReceive(payment)}
+              className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70"
+            >
+              Konfirmasi →
+            </button>
+          )}
+          {isPaid && editable && arrivals.length <= 1 && (
+            <button
+              type="button"
+              onClick={() => onEdit(payment)}
+              className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70"
+            >
+              Edit →
+            </button>
+          )}
+        </div>
       </div>
+      {arrivals.length > 1 && (
+        <div className="pb-2 pl-12 space-y-0.5">
+          {arrivals.map(({ r, part }) => (
+            <div key={r.id} className="flex justify-between text-[12px] text-ink-mute">
+              <span>{formatDate(r.date, { short: true })}</span>
+              <span className="font-num">{formatCurrency(part.amount, false)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useDemo } from '../../contexts/DemoContext';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { rowRemaining, rowState } from '../../utils/paymentStatus';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { projectSummary, findNextDuePayment } from '../../utils/projectSchedule';
 import Pill from '../common/Pill';
@@ -11,6 +12,11 @@ export default function ProjectCard({ project, index }) {
   const base = isDemo ? '/demo' : '';
   const summary = projectSummary(project);
   const next = findNextDuePayment(project);
+  // What the borrower is short on tagihan he has already started paying. Not
+  // the same as "not yet due", which is the normal state of a young project.
+  const shortfall = (project.payments || [])
+    .filter((row) => rowState(project, row) === 'kurang')
+    .reduce((s, row) => s + rowRemaining(project, row), 0);
   const isActive = project.status === 'active';
   const isDefault = project.status === 'default';
   const isCompleted = project.status === 'completed';
@@ -73,6 +79,7 @@ export default function ProjectCard({ project, index }) {
             {isActive && <Pill tone="indigo">Aktif</Pill>}
             {isCompleted && <Pill tone="daun">Selesai</Pill>}
             {isDefault && <Pill tone="terra">Macet</Pill>}
+            {shortfall > 0 && <Pill tone="emas">Kurang {formatCurrency(shortfall, false)}</Pill>}
           </div>
           <div className="text-[12px] text-ink-mute mt-0.5">
             Modal {formatCurrency(project.disbursedAmount)} · {project.monthlyReturnPct}%/bulan ·{' '}

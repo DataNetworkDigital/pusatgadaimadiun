@@ -229,7 +229,7 @@ function collectionRows(projects, filter) {
         dueStr: formatDate(pay.dueDate),
         jenis: pay.type === 'final' ? 'Pelunasan' : 'Cicilan',
         amount: paid ? rowReceived(p, pay) : rowRemaining(p, pay),
-        status: paid ? 'Lunas' : 'Belum',
+        status: paid ? 'Lunas' : rowReceived(p, pay) > 0 ? 'Kurang' : 'Belum',
         paidStr: pay.receivedDate ? formatDate(pay.receivedDate) : '',
       });
     });
@@ -287,14 +287,18 @@ export function exportCollectionToPdf(projects, accounts, filter = null, columnK
     columnStyles,
     didParseCell: (data) => {
       const r = rows[data.row.index];
-      if (data.section === 'body' && r && r.status === 'Belum') {
+      // Still-outstanding rows (nothing arrived, or only part of it) both get
+      // the highlight -- 'Kurang' owes just as much attention as 'Belum'.
+      if (data.section === 'body' && r && r.status !== 'Lunas') {
         data.cell.styles.fillColor = [250, 240, 235];
       }
     },
   });
 
+  // 'Kurang' rows still owe their remainder -- excluding them here would
+  // silently undercount what the collector actually needs to go get.
   const totalOutstanding = rows
-    .filter((r) => r.status === 'Belum')
+    .filter((r) => r.status !== 'Lunas')
     .reduce((s, r) => s + r.amount, 0);
   const totalAll = rows.reduce((s, r) => s + r.amount, 0);
   const y = doc.lastAutoTable.finalY + 8;
