@@ -8,6 +8,7 @@ import { useAuth } from './AuthContext';
 import { useDemo } from './DemoContext';
 import { useToast } from './ToastContext';
 import { normalizeProject } from '../utils/normalizeProject';
+import { hasAnyReceipt, isSettled, projectReceivedTotal } from '../utils/paymentStatus';
 import { generateProjectSchedule, recomputeUnpaidSchedule } from '../utils/projectSchedule';
 import { notifyTelegram, syncToDanaTrack } from '../utils/telegram';
 
@@ -441,7 +442,7 @@ export function DataProvider({ children }) {
   async function updateProject(id, data) {
     const project = projects.find((p) => p.id === id);
     if (!project) throw new Error('Project tidak ditemukan');
-    const hasReceived = (project.payments || []).some((p) => p.receivedAmount != null);
+    const hasReceived = hasAnyReceipt(project);
 
     const update = {};
     // Text/metadata fields — always editable
@@ -629,8 +630,11 @@ export function DataProvider({ children }) {
           }
         : p
     );
+    // Normalize first: on a locally built array the waiver for an
+    // under-confirmed row is what keeps this answering as it does today.
+    const afterWrite = normalizeProject({ payments: updatedPayments });
     const allPaid =
-      updatedPayments.length > 0 && updatedPayments.every((p) => p.receivedAmount != null);
+      afterWrite.payments.length > 0 && afterWrite.payments.every((row) => isSettled(afterWrite, row));
     const update = { payments: updatedPayments };
     if (allPaid && project.status === 'active') {
       update.status = 'completed';
@@ -736,8 +740,7 @@ export function DataProvider({ children }) {
       });
     }
 
-    const totalReceived =
-      (project.payments || []).reduce((s, p) => s + (p.receivedAmount || 0), 0) + recv;
+    const totalReceived = projectReceivedTotal(project) + recv;
     const lossAmount = Math.max(0, (project.disbursedAmount || 0) - totalReceived);
 
     batch.update(doc(db, C('projects'), projectId), {
@@ -782,7 +785,7 @@ export function DataProvider({ children }) {
       updatedAt: serverTimestamp(),
     });
 
-    const keptPaid = (project.payments || []).filter((p) => p.receivedAmount != null);
+    const keptPaid = (project.payments || []).filter((p) => p.receivedAmount != null || isSettled(project, p));
     const settleNo = keptPaid.reduce((max, p) => Math.max(max, p.no || 0), 0) + 1;
     const settlementRow = {
       no: settleNo,
@@ -829,18 +832,20 @@ export function DataProvider({ children }) {
       });
     }
 
-    // 2. Claw back every received return from the account it was deposited to
-    for (const p of project.payments || []) {
-      if (p.receivedAmount != null) {
-        if (p.transactionId) {
-          batch.delete(doc(db, C('transactions'), p.transactionId));
-        }
-        if (p.accountId && p.receivedAmount) {
-          batch.update(doc(db, C('accounts'), p.accountId), {
-            balance: increment(-(p.receivedAmount || 0)),
-            updatedAt: serverTimestamp(),
-          });
-        }
+    // 2. Claw back every received return from the account it was deposited to.
+    // Walks receipts, not rows: once one tagihan can be paid several times, the
+    // money lives on the receipts and a row-based loop would refund only one of
+    // them.
+    for (const r of project.receipts || []) {
+      const amt = Number(r?.amount) || 0;
+      if (r?.transactionId) {
+        batch.delete(doc(db, C('transactions'), r.transactionId));
+      }
+      if (r?.accountId && amt) {
+        batch.update(doc(db, C('accounts'), r.accountId), {
+          balance: increment(-amt),
+          updatedAt: serverTimestamp(),
+        });
       }
     }
 
@@ -858,7 +863,7 @@ export function DataProvider({ children }) {
 
     batch.delete(doc(db, C('projects'), id));
     await batch.commit();
-    const clawedBack = (project.payments || []).reduce((s, p) => s + (p.receivedAmount || 0), 0);
+    const clawedBack = projectReceivedTotal(project);
     toast(clawedBack > 0 ? 'Project dibatalkan, modal & return dikembalikan' : 'Project dibatalkan, modal dikembalikan');
   }
 
