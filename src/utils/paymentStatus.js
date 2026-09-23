@@ -12,6 +12,17 @@ import { toDate } from './formatDate';
  * BOTH shapes: the receipts array Bagian B2 stores, and the single
  * `receivedAmount` field stored today. That dual support is what lets the
  * writing side change later without touching the readers again.
+ *
+ * A row whose due is unknown (see hasKnownDue below) reports a rowRemaining
+ * of 0, same as a row that truly owes nothing -- see the comment on
+ * rowRemaining for why. That 0 feeds straight into a SUM if a caller adds
+ * rowRemaining across a project's rows to get "how much is still owed"
+ * overall: an unknown-due row silently contributes nothing to that total, so
+ * the total undercounts by exactly that row's real, unrecorded amount. This
+ * is the same thing the old `receivedAmount != null` code did with such a
+ * row, so it is not a regression -- but do not treat a summed remainder as
+ * trustworthy proof that nothing more is owed on a project that has a row
+ * with an unknown amount.
  */
 
 function receiptsOf(project) {
@@ -28,7 +39,7 @@ export function rowReceived(project, row) {
   if (receipts) {
     let sum = 0;
     for (const r of receipts) {
-      for (const a of r?.allocations || []) {
+      for (const a of Array.isArray(r?.allocations) ? r.allocations : []) {
         if (a?.no === row.no) sum += Number(a.amount) || 0;
       }
     }

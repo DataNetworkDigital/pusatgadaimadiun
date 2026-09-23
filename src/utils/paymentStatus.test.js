@@ -3,6 +3,7 @@ import {
   rowReceived, rowWaived, rowDue, rowRemaining, rowState,
   isSettled, isOverdue, projectReceivedTotal, hasAnyReceipt,
 } from './paymentStatus';
+import { generateProjectSchedule } from './projectSchedule';
 
 const row = (over = {}) => ({ no: 1, type: 'interest', expectedAmount: 5_500_000, dueDate: new Date(2026, 9, 5), ...over });
 
@@ -39,6 +40,45 @@ describe('rowReceived', () => {
   it('reads an unpaid legacy row as zero, not NaN', () => {
     const r = row({ receivedAmount: null });
     expect(rowReceived(legacy([r]), r)).toBe(0);
+  });
+});
+
+// None of these invariants are enforced here on purpose: rowReceived must stay
+// a fast, total read helper, not a validator. The receipts writer Bagian B2
+// builds is where a malformed or dishonest receipt should be rejected. These
+// tests pin exactly what happens today so that (a) B2 cannot change this
+// module's read behaviour by accident while building the writer, and (b)
+// whoever builds the writer can see precisely which shapes it must prevent
+// from ever reaching Firestore in the first place.
+describe('allocation invariants nothing here enforces (the write boundary is B2\'s job)', () => {
+  it('KNOWN GAP, not desired behaviour: two allocations in one receipt pointing at the same row double-count it, so a tagihan reads as paid when only half of it actually arrived', () => {
+    const r = row(); // expectedAmount 5_500_000
+    const p = withReceipts([r], [
+      { id: 'a', amount: 5_500_000, allocations: [{ no: 1, amount: 5_500_000 }, { no: 1, amount: 5_500_000 }] },
+    ]);
+    expect(rowReceived(p, r)).toBe(11_000_000);
+    expect(isSettled(p, r)).toBe(true); // dangerous: only 5.5jt (the receipt's own amount) ever arrived
+  });
+
+  it('KNOWN GAP, not desired behaviour: a negative allocation makes rowReceived and projectReceivedTotal disagree on how much money arrived', () => {
+    const r = row();
+    const p = withReceipts([r], [
+      { id: 'a', amount: 5_500_000, allocations: [{ no: 1, amount: -5_500_000 }] },
+    ]);
+    expect(rowReceived(p, r)).toBe(-5_500_000);
+    expect(projectReceivedTotal(p)).toBe(5_500_000);
+  });
+
+  it('a receipt with no allocations key at all contributes 0 to the row, not a crash', () => {
+    const r = row();
+    const p = withReceipts([r], [{ id: 'a', amount: 5_500_000 }]);
+    expect(rowReceived(p, r)).toBe(0);
+  });
+
+  it('a receipt whose allocations is an object, not an array, contributes 0 to the row instead of throwing', () => {
+    const r = row();
+    const p = withReceipts([r], [{ id: 'a', amount: 5_500_000, allocations: { no: 1, amount: 5_500_000 } }]);
+    expect(rowReceived(p, r)).toBe(0);
   });
 });
 
@@ -185,5 +225,28 @@ describe('rowDue', () => {
   it('is the tagihan amount, coerced', () => {
     expect(rowDue(row({ expectedAmount: '5500000' }))).toBe(5_500_000);
     expect(rowDue(row({ expectedAmount: undefined }))).toBe(0);
+  });
+});
+
+// rowReceived matches allocations to a row with `a?.no === row.no`, a strict
+// comparison: 1 !== '1'. Every writer of `no` in the repo (generateProjectSchedule,
+// recomputeUnpaidSchedule, demoSeedData, demoReset, settleProjectEarly) produces a
+// number, so the strict comparison is correct today. This pins that contract for
+// the schedule generator specifically, so a future writer that starts producing a
+// string trips this test instead of silently failing to match any allocation.
+describe('generateProjectSchedule produces a numeric no', () => {
+  it('every row of a generated schedule has a numeric no', () => {
+    const schedule = generateProjectSchedule({
+      principalAmount: 100_000_000,
+      returnPctTier1: 5.5,
+      returnPctTier2: 6.5,
+      durationMonths: 3,
+      startDate: new Date(2026, 0, 5),
+      paymentDayOfMonth: 5,
+    });
+    expect(schedule.length).toBeGreaterThan(0);
+    for (const p of schedule) {
+      expect(typeof p.no).toBe('number');
+    }
   });
 });
