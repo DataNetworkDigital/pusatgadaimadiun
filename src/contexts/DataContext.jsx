@@ -7,6 +7,7 @@ import { db } from '../firebase';
 import { useAuth } from './AuthContext';
 import { useDemo } from './DemoContext';
 import { useToast } from './ToastContext';
+import { normalizeProject } from '../utils/normalizeProject';
 import { generateProjectSchedule, recomputeUnpaidSchedule } from '../utils/projectSchedule';
 import { notifyTelegram, syncToDanaTrack } from '../utils/telegram';
 
@@ -74,7 +75,9 @@ export function DataProvider({ children }) {
     const unsubP = onSnapshot(
       query(collection(db, C('projects')), orderBy('createdAt', 'desc')),
       (snap) => {
-        setProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        // One shape for every screen. Stored documents are untouched; the
+        // receipts view is derived on read until the Bagian B4 migration.
+        setProjects(snap.docs.map((d) => normalizeProject({ id: d.id, ...d.data() })));
         markLoaded('p');
       },
       onErr('p')
