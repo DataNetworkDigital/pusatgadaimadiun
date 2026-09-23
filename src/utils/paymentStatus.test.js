@@ -133,7 +133,37 @@ describe('rowRemaining and rowState', () => {
   });
 });
 
-describe('unknown due (expectedAmount missing or not a number)', () => {
+// A row is settled only when its remainder is zero AND something has
+// actually happened to it -- money was allocated to it, or a waiver closed
+// it. A due of 0 is not, by itself, activity: ProjectForm allows a 0% return
+// rate, and rounding can take a small enough instalment to 0, so an
+// untouched Rp0 row is a real, reachable shape, not just a test fixture. On
+// main such a row can never be confirmed (every confirmation path rejects
+// amount <= 0), so it stays "Belum" forever; this module must agree, or
+// recordProjectPayment's allPaid check reads it as settled from the moment
+// it is created and can flip an active project to completed on its own.
+describe('a row is settled only once something has actually happened to it', () => {
+  it('an untouched zero-due row is belum, not lunas -- a due of 0 is not activity by itself', () => {
+    const r = row({ expectedAmount: 0 });
+    const p = legacy([r]);
+    expect(isSettled(p, r)).toBe(false);
+    expect(rowState(p, r)).toBe('belum');
+  });
+
+  it('a zero-due row with a stored receivedAmount of 0 is settled -- that 0 was actually recorded, unlike an untouched row', () => {
+    const r = row({ expectedAmount: 0, receivedAmount: 0 });
+    const p = legacy([r]);
+    expect(isSettled(p, r)).toBe(true);
+    expect(rowState(p, r)).toBe('lunas');
+  });
+
+  it('an untouched normal-due row stays belum', () => {
+    const r = row();
+    const p = legacy([r]);
+    expect(isSettled(p, r)).toBe(false);
+    expect(rowState(p, r)).toBe('belum');
+  });
+
   it('a null expectedAmount with nothing received is not settled', () => {
     const r = row({ expectedAmount: null });
     const p = legacy([r]);
@@ -153,13 +183,6 @@ describe('unknown due (expectedAmount missing or not a number)', () => {
     const p = legacy([r]);
     expect(isSettled(p, r)).toBe(false);
     expect(rowState(p, r)).toBe('belum');
-  });
-
-  it('a genuinely zero expectedAmount, unlike an unknown one, is settled', () => {
-    const r = row({ expectedAmount: 0 });
-    const p = legacy([r]);
-    expect(isSettled(p, r)).toBe(true);
-    expect(rowState(p, r)).toBe('lunas');
   });
 
   it('stays settled once money has arrived, even with an unknown expectedAmount', () => {

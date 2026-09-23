@@ -31,6 +31,10 @@ const projects = [
     { no: 1, expectedAmount: null, receivedAmount: null, type: 'interest' },
     { no: 2, expectedAmount: 5_500_000, receivedAmount: 5_500_000, type: 'interest' },
   ] },
+  { id: 'zero-due-untouched', payments: [
+    { no: 1, expectedAmount: 0, receivedAmount: null, type: 'interest' },
+    { no: 2, expectedAmount: 5_500_000, receivedAmount: 5_500_000, type: 'interest' },
+  ] },
   { id: 'no-payments', payments: [] },
 ];
 

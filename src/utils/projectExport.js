@@ -28,9 +28,11 @@ function paymentRow(p, payment, accountName) {
     Jenis: payment.type === 'final' ? 'Pelunasan' : 'Cicilan Return',
     'Jatuh Tempo': payment.dueDate ? formatDate(payment.dueDate) : '',
     'Estimasi (Rp)': payment.expectedAmount,
-    // Blank when no money reached this tagihan, otherwise the amount. Written
-    // as an explicit comparison rather than `|| ''` because this is a currency
-    // cell: `||` would also blank a legitimate zero.
+    // Blank when no money reached this tagihan, otherwise the amount. A
+    // stored zero and nothing at all look identical here either way --
+    // rowReceived has no way to tell "received exactly 0" from "received
+    // nothing" apart, so this comparison and `|| ''` would blank the same
+    // rows.
     'Diterima (Rp)': rowReceived(p, payment) > 0 ? rowReceived(p, payment) : '',
     'Tanggal Diterima': payment.receivedDate ? formatDate(payment.receivedDate) : '',
     'Rekening Tujuan': accountName(payment.accountId),

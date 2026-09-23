@@ -7,14 +7,16 @@
  *
  * This does not itself write anything. It does, however, reach stored documents
  * indirectly: because `payments` in React state is normalized, any write that
- * spreads that array back (recordProjectPayment, settleProjectEarly) persists
- * the derived `closure` onto sibling rows it did not otherwise touch. That is
- * harmless — the value is exactly what the Bagian B4 migration would write, it
- * changes no amount, and re-normalizing a row that already has a closure is a
- * no-op — but two things follow from it. The B4 migration must be idempotent,
- * and it must find historical shortfalls by `closure.reason === 'legacy'`
- * rather than by the absence of a closure, or its report to the owner will
- * quietly miss the rows that were written this way first.
+ * spreads that array back (recordProjectPayment, updateProjectPayment,
+ * settleProjectEarly, and updateProject when a schedule change runs
+ * recomputeUnpaidSchedule) persists the derived `closure` onto sibling rows it
+ * did not otherwise touch. That is harmless — the value is exactly what the
+ * Bagian B4 migration would write, it changes no amount, and re-normalizing a
+ * row that already has a closure is a no-op — but two things follow from it.
+ * The B4 migration must be idempotent, and it must find historical shortfalls
+ * by `closure.reason === 'legacy'` rather than by the absence of a closure, or
+ * its report to the owner will quietly miss the rows that were written this
+ * way first.
  *
  * The waiver matters. Before partial payments existed, confirming a tagihan
  * closed it whatever amount was typed, so the business has history where less

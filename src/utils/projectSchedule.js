@@ -70,8 +70,11 @@ export function recomputeUnpaidSchedule(existingPayments, {
   const months = Number(durationMonths) || 1;
   const paidByNo = new Map();
   for (const p of existingPayments || []) {
-    // A row is kept when money reached it or a closure settled it; regenerating
-    // such a row would throw away the record of what actually happened.
+    // A row is kept when money reached it or it has been closed some other
+    // way; regenerating such a row would throw away the record of what
+    // actually happened. Not every closure kind means settled -- only
+    // kind: 'waive' does (see rowWaived in paymentStatus.js) -- this just
+    // keeps whatever was recorded, whichever kind it turns out to be.
     if (p.receivedAmount != null || p.closure) paidByNo.set(p.no, p);
   }
 
