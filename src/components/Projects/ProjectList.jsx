@@ -308,11 +308,11 @@ export default function ProjectList() {
       <ExportSheet
         open={exportOpen}
         onClose={() => setExportOpen(false)}
-        onExportExcel={(filter) => exportProjectsToExcel(projects, accounts, filter)}
-        onExportPdf={(mode, filter) => exportProjectsToPdf(projects, accounts, mode, filter)}
-        onExportCollection={(filter) => {
-          exportCollectionToPdf(projects, accounts, filter);
-          exportCollectionToExcel(projects, accounts, filter);
+        onExportExcel={(filter, keys) => exportProjectsToExcel(projects, accounts, filter, keys)}
+        onExportPdf={(mode, filter, keys) => exportProjectsToPdf(projects, accounts, mode, filter, keys)}
+        onExportCollection={(filter, keys) => {
+          exportCollectionToPdf(projects, accounts, filter, keys);
+          exportCollectionToExcel(projects, accounts, filter, keys);
         }}
         counts={{ active: active.length, archive: archived.length, total: projects.length }}
       />

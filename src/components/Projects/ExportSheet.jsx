@@ -9,12 +9,18 @@ import {
   IcChevronLeft,
   IcCheck,
 } from '../common/icons';
+import ColumnPicker from './ColumnPicker';
+import { PROJECT_COLUMNS, COLLECTION_COLUMNS, defaultKeys } from '../../utils/exportColumns';
+import { loadColumnKeys, saveColumnKeys } from '../../utils/exportPrefs';
 
 export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf, onExportCollection, counts }) {
   const [step, setStep] = useState('home');
   const [useDateFilter, setUseDateFilter] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  // What to run once columns are chosen: { kind, backTo, run }
+  const [pending, setPending] = useState(null);
+  const [cols, setCols] = useState([]);
 
   useEffect(() => {
     if (open) {
@@ -22,6 +28,7 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
       setUseDateFilter(false);
       setFrom('');
       setTo('');
+      setPending(null);
     }
   }, [open]);
 
@@ -39,6 +46,25 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
     setTimeout(() => action(), 120);
   }
 
+  const registryFor = (kind) => (kind === 'collection' ? COLLECTION_COLUMNS : PROJECT_COLUMNS);
+
+  function openColumns(kind, backTo, run) {
+    setPending({ kind, backTo, run });
+    setCols(loadColumnKeys(kind, defaultKeys(registryFor(kind))));
+    setStep('columns');
+  }
+
+  function toggleCol(key) {
+    setCols((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  function confirmColumns() {
+    if (!pending || cols.length === 0) return;
+    saveColumnKeys(pending.kind, cols);
+    const run = pending.run;
+    fire(() => run(cols));
+  }
+
   const homeItems = [
     {
       key: 'xlsx',
@@ -47,7 +73,7 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
       Icon: IcDownload,
       iconBg: 'bg-daun-soft',
       iconColor: '#5C8A4E',
-      onClick: () => fire(() => onExportExcel(filter)),
+      onClick: () => openColumns('project', 'home', (keys) => onExportExcel(filter, keys)),
       disabled: counts.total === 0,
     },
     {
@@ -83,7 +109,7 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
       hint: `${counts.active} project`,
       iconBg: 'bg-indigo-soft',
       iconColor: '#2D4A6B',
-      onClick: () => fire(() => onExportPdf('active', filter)),
+      onClick: () => openColumns('project', 'pdf', (keys) => onExportPdf('active', filter, keys)),
       disabled: counts.active === 0,
     },
     {
@@ -92,7 +118,7 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
       hint: `${counts.archive} project`,
       iconBg: 'bg-terra-soft',
       iconColor: '#B85450',
-      onClick: () => fire(() => onExportPdf('archive', filter)),
+      onClick: () => openColumns('project', 'pdf', (keys) => onExportPdf('archive', filter, keys)),
       disabled: counts.archive === 0,
     },
     {
@@ -100,37 +126,67 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
       label: 'Semua project',
       iconBg: 'bg-emas-soft',
       iconColor: '#C9952F',
-      onClick: () => fire(() => onExportPdf('all', filter)),
+      onClick: () => openColumns('project', 'pdf', (keys) => onExportPdf('all', filter, keys)),
       disabled: counts.total === 0,
     },
   ];
 
   const isPdf = step === 'pdf';
   const isCollection = step === 'collection';
+  const isColumns = step === 'columns';
   const items = isPdf ? pdfItems : homeItems;
   const collectionFilter =
     from && to ? { from: fromDateInput(from), to: fromDateInput(to) } : null;
 
-  const title = isPdf ? 'Cakupan PDF' : isCollection ? 'Daftar Tagihan' : 'Export Project';
-  const subtitle = isPdf
-    ? 'Pilih project mana yang masuk ke PDF'
-    : isCollection
-      ? 'Pilih periode jatuh tempo tagihan'
-      : 'Pilih format yang mau diunduh';
+  const title = isColumns
+    ? 'Pilih kolom'
+    : isPdf
+      ? 'Cakupan PDF'
+      : isCollection
+        ? 'Daftar Tagihan'
+        : 'Export Project';
+  const subtitle = isColumns
+    ? 'Centang data yang mau ikut diunduh'
+    : isPdf
+      ? 'Pilih project mana yang masuk ke PDF'
+      : isCollection
+        ? 'Pilih periode jatuh tempo tagihan'
+        : 'Pilih format yang mau diunduh';
 
   return (
     <Modal open={open} onClose={close} title={title} subtitle={subtitle}>
-      {(isPdf || isCollection) && (
+      {(isPdf || isCollection || isColumns) && (
         <button
           type="button"
-          onClick={() => setStep('home')}
+          onClick={() => setStep(isColumns ? pending?.backTo || 'home' : 'home')}
           className="flex items-center gap-1 text-[13px] text-indigo font-semibold mb-3 active:opacity-70"
         >
           <IcChevronLeft size={16} sw={2} /> Kembali
         </button>
       )}
 
-      {isCollection && (
+      {isColumns && pending && (
+        <div className="space-y-3">
+          <ColumnPicker
+            columns={registryFor(pending.kind)}
+            selected={cols}
+            onToggle={toggleCol}
+          />
+          <p className="text-[12px] text-ink-mute">
+            {cols.length} kolom dipilih. Pilihan ini diingat di HP ini.
+          </p>
+          <button
+            type="button"
+            disabled={cols.length === 0}
+            onClick={confirmColumns}
+            className="w-full py-3 rounded-xl bg-indigo text-cream font-semibold text-[15px] active:bg-indigo-deep disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Download
+          </button>
+        </div>
+      )}
+
+      {isCollection && !isColumns && (
         <div className="space-y-4">
           <div className="rounded-2xl border border-line bg-paper p-3">
             <div className="text-[13px] font-semibold text-ink mb-2">
@@ -171,7 +227,11 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
           <button
             type="button"
             disabled={!collectionFilter}
-            onClick={() => fire(() => onExportCollection(collectionFilter))}
+            onClick={() =>
+              openColumns('collection', 'collection', (keys) =>
+                onExportCollection(collectionFilter, keys)
+              )
+            }
             className="w-full py-3 rounded-xl bg-indigo text-cream font-semibold text-[15px] active:bg-indigo-deep disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Download PDF + Excel
@@ -179,7 +239,7 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
         </div>
       )}
 
-      {!isPdf && !isCollection && (
+      {!isPdf && !isCollection && !isColumns && (
         <div className="mb-4 rounded-2xl border border-line bg-paper p-3">
           <button
             type="button"
@@ -231,7 +291,7 @@ export default function ExportSheet({ open, onClose, onExportExcel, onExportPdf,
         </div>
       )}
 
-      {!isCollection && (
+      {!isCollection && !isColumns && (
       <div className="space-y-2">
         {items.map(({ key, label, hint, Icon, iconBg, iconColor, onClick, disabled }) => (
           <button
