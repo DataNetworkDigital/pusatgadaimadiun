@@ -5,10 +5,11 @@ import DateField from '../common/DateField';
 import { formatDateInput, fromDateInput } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { projectSummary } from '../../utils/projectSchedule';
-import { isSettled } from '../../utils/paymentStatus';
+import { settlementSuggestion } from '../../utils/settlement';
 
 // Early full settlement (pelunasan dipercepat). The default amount follows the
-// owner's rule: modal keluar (disbursed) + the current month's interest. All
+// owner's rule: modal keluar (disbursed) + the current month's interest, with
+// partial payments taken into account (see settlementSuggestion). All
 // remaining unpaid scheduled months are dropped once this is confirmed.
 export default function SettleProjectSheet({ open, onClose, project, accounts, onConfirm }) {
   const [amount, setAmount] = useState(0);
@@ -17,27 +18,8 @@ export default function SettleProjectSheet({ open, onClose, project, accounts, o
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const { disbursed, currentInterest, defaultAmount, unpaidRemaining } = useMemo(() => {
-    if (!project) return { disbursed: 0, currentInterest: 0, defaultAmount: 0, unpaidRemaining: 0 };
-    const disb = Number(project.disbursedAmount) || 0;
-    const principal = Number(project.principalAmount) || 0;
-    const payments = project.payments || [];
-    const nextInterest = payments.find(
-      (p) => !isSettled(project, p) && p.type === 'interest'
-    );
-    // Current month's interest; fall back to the interest deducted upfront
-    // (principal − disbursed) when only the final principal is left unpaid.
-    const curInt = nextInterest
-      ? Number(nextInterest.expectedAmount) || 0
-      : Math.max(0, principal - disb);
-    const unpaid = payments.filter((p) => !isSettled(project, p)).length;
-    return {
-      disbursed: disb,
-      currentInterest: curInt,
-      defaultAmount: disb + curInt,
-      unpaidRemaining: unpaid,
-    };
-  }, [project]);
+  const suggestion = useMemo(() => (project ? settlementSuggestion(project) : null), [project]);
+  const defaultAmount = suggestion?.amount || 0;
 
   useEffect(() => {
     if (open && project) {
@@ -93,15 +75,31 @@ export default function SettleProjectSheet({ open, onClose, project, accounts, o
           <div className="flex justify-between">
             <span>Modal keluar</span>
             <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {formatCurrency(disbursed)}
+              {formatCurrency(suggestion.disbursed)}
             </span>
           </div>
           <div className="flex justify-between">
-            <span>Bunga bulan ini</span>
+            <span>{suggestion.currentPaid > 0 ? 'Sisa bunga bulan ini' : 'Bunga bulan ini'}</span>
             <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {formatCurrency(currentInterest)}
+              {formatCurrency(suggestion.currentInterest)}
             </span>
           </div>
+          {suggestion.shortfall > 0 && (
+            <div className="flex justify-between">
+              <span>Kurang bayar bulan lain</span>
+              <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {formatCurrency(suggestion.shortfall)}
+              </span>
+            </div>
+          )}
+          {suggestion.principalPaid > 0 && (
+            <div className="flex justify-between">
+              <span>Pelunasan yang sudah masuk</span>
+              <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                −{formatCurrency(suggestion.principalPaid)}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between border-t border-line pt-1 mt-1">
             <span className="font-semibold text-ink">Saran pelunasan</span>
             <span className="font-num font-bold text-indigo" style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -138,9 +136,9 @@ export default function SettleProjectSheet({ open, onClose, project, accounts, o
           <DateField value={date} onChange={setDate} />
         </div>
 
-        {unpaidRemaining > 1 && (
+        {suggestion.laterDropped > 0 && (
           <p className="text-[12px] text-ink-mute leading-snug">
-            {unpaidRemaining - 1} jadwal pembayaran berikutnya akan dihapus dan tidak lagi dihitung
+            {suggestion.laterDropped} jadwal pembayaran berikutnya akan dihapus dan tidak lagi dihitung
             sebagai proyeksi pendapatan.
           </p>
         )}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Modal from '../common/Modal';
 import CurrencyInput from '../common/CurrencyInput';
 import DateField from '../common/DateField';
@@ -10,32 +10,57 @@ import { rowRemaining } from '../../utils/paymentStatus';
 // Receiving money. The owner types what arrived; the sheet shows which tagihan
 // it will close before he commits, so a split payment is never a surprise.
 export default function ReceiptSheet({ open, onClose, project, accounts, defaultNo, onSubmit }) {
-  const [amount, setAmount] = useState(0);
-  const [account, setAccount] = useState('cash');
-  const [date, setDate] = useState(formatDateInput(new Date()));
-  const [startNo, setStartNo] = useState('');
+  if (!open || !project) return null;
+  // The form mounts fresh each time the sheet opens, and only then. Resetting
+  // on every change to `project` would wipe what the owner is typing whenever
+  // a snapshot arrives, including one for a different project.
+  return (
+    <ReceiptForm
+      key={defaultNo ?? 'oldest'}
+      onClose={onClose}
+      project={project}
+      accounts={accounts}
+      defaultNo={defaultNo}
+      onSubmit={onSubmit}
+    />
+  );
+}
+
+function initialTarget(project, defaultNo) {
+  const rows = openRows(project);
+  return (defaultNo != null ? rows.find((r) => r.no === defaultNo) : rows[0]) || null;
+}
+
+// Money comes back to the account the modal left from, as it always did
+// before this sheet existed; the owner's habit of tapping Simpan relies on it.
+function defaultAccount(project, accounts) {
+  const list = accounts || [];
+  if (project.sourceAccountId && list.some((a) => a.id === project.sourceAccountId)) {
+    return project.sourceAccountId;
+  }
+  return list[0]?.id || 'cash';
+}
+
+function ReceiptForm({ onClose, project, accounts, defaultNo, onSubmit }) {
+  const [amount, setAmount] = useState(() => {
+    const target = initialTarget(project, defaultNo);
+    return target ? rowRemaining(project, target) : 0;
+  });
+  const [account, setAccount] = useState(() => defaultAccount(project, accounts));
+  const [date, setDate] = useState(() => formatDateInput(new Date()));
+  const [startNo, setStartNo] = useState(() => {
+    const target = initialTarget(project, defaultNo);
+    return target ? String(target.no) : '';
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const rows = useMemo(() => (project ? openRows(project) : []), [project]);
+  const rows = useMemo(() => openRows(project), [project]);
 
-  useEffect(() => {
-    if (!open || !project) return;
-    const target = defaultNo != null ? rows.find((r) => r.no === defaultNo) : rows[0];
-    setStartNo(target ? String(target.no) : '');
-    setAmount(target ? rowRemaining(project, target) : 0);
-    setAccount(accounts?.[0]?.id ? accounts[0].id : 'cash');
-    setDate(formatDateInput(new Date()));
-    setError('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultNo, project]);
-
-  const preview = useMemo(() => {
-    if (!project) return { allocations: [], leftover: 0 };
-    return allocateReceipt(project, amount, startNo ? Number(startNo) : null);
-  }, [project, amount, startNo]);
-
-  if (!open || !project) return null;
+  const preview = useMemo(
+    () => allocateReceipt(project, amount, startNo ? Number(startNo) : null),
+    [project, amount, startNo]
+  );
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -62,7 +87,7 @@ export default function ReceiptSheet({ open, onClose, project, accounts, default
 
   return (
     <Modal
-      open={open}
+      open
       onClose={onClose}
       title="Terima pembayaran"
       subtitle={project.name}
