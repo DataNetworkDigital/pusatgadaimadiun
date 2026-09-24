@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useData } from '../../contexts/DataContext';
+import { useToast } from '../../contexts/ToastContext';
 import PageHeader from '../common/PageHeader';
 import IconButton from '../common/IconButton';
 import FAB from '../common/FAB';
@@ -18,6 +19,7 @@ const INITIAL_FILTERS = { search: '', type: '', accountId: '', dateFrom: '', dat
 
 export default function TransactionList() {
   const { transactions, accounts, deleteTransaction } = useData();
+  const { showToast } = useToast();
   const [filterOpen, setFilterOpen] = useState(false);
   const [filters, setFilters] = useState(INITIAL_FILTERS);
   const [formOpen, setFormOpen] = useState(false);
@@ -96,7 +98,11 @@ export default function TransactionList() {
   }
   async function handleConfirmDelete() {
     if (!deleting) return;
-    await deleteTransaction(deleting.id);
+    try {
+      await deleteTransaction(deleting.id);
+    } catch (e) {
+      showToast(e.message || 'Gagal menghapus');
+    }
     setDeleting(null);
   }
   function openAdd() {

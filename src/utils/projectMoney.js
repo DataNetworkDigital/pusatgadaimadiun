@@ -7,3 +7,12 @@ export function projectOfTransaction(tx, projects) {
   if (!tx?.projectId) return null;
   return (projects || []).find((p) => p.id === tx.projectId) || null;
 }
+
+// Whether Edit and Hapus must stay closed for this transaction. While the
+// projects are still loading, a projectId cannot be told apart from an
+// orphan's, so anything carrying one stays locked until they arrive.
+export function isProjectMoney(tx, projects, projectsLoaded) {
+  if (!tx?.projectId) return false;
+  if (!projectsLoaded) return true;
+  return !!projectOfTransaction(tx, projects);
+}

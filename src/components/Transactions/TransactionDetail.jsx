@@ -4,18 +4,19 @@ import { useData } from '../../contexts/DataContext';
 import { useDemo } from '../../contexts/DemoContext';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
-import { projectOfTransaction } from '../../utils/projectMoney';
+import { isProjectMoney, projectOfTransaction } from '../../utils/projectMoney';
 
 const TYPE_LABEL = { income: 'Pemasukan', expense: 'Pengeluaran', transfer: 'Transfer' };
 
 export default function TransactionDetail({ tx, accounts, open, onClose, onEdit, onDelete }) {
-  const { projects } = useData();
+  const { projects, loading } = useData();
   const { isDemo } = useDemo();
   if (!tx) return null;
   const accountName = (id) => accounts.find((a) => a.id === id)?.name || '-';
   const color = tx.type === 'income' ? 'text-income' : tx.type === 'transfer' ? 'text-transfer' : 'text-expense';
   const sign = tx.type === 'income' ? '+' : tx.type === 'transfer' ? '' : '-';
   const project = projectOfTransaction(tx, projects);
+  const locked = isProjectMoney(tx, projects, !loading);
 
   return (
     <Modal
@@ -23,14 +24,18 @@ export default function TransactionDetail({ tx, accounts, open, onClose, onEdit,
       onClose={onClose}
       title="Detail Transaksi"
       footer={
-        project ? (
-          <Link
-            to={`${isDemo ? '/demo' : ''}/project/${project.id}`}
-            onClick={onClose}
-            className="btn-primary w-full block text-center"
-          >
-            Buka project
-          </Link>
+        locked ? (
+          project ? (
+            <Link
+              to={`${isDemo ? '/demo' : ''}/project/${project.id}`}
+              onClick={onClose}
+              className="btn-primary w-full block text-center"
+            >
+              Buka project
+            </Link>
+          ) : (
+            <p className="text-center text-[13px] text-ink-mute">Memuat data project…</p>
+          )
         ) : (
           <div className="flex gap-2">
             <button className="btn-secondary flex-1" onClick={() => onEdit(tx)}>Edit</button>

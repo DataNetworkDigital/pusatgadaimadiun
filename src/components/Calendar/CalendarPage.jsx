@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useData } from '../../contexts/DataContext';
+import { useToast } from '../../contexts/ToastContext';
 import PageHeader from '../common/PageHeader';
 import IconButton from '../common/IconButton';
 import Card from '../common/Card';
@@ -29,6 +30,7 @@ export default function CalendarPage() {
     deleteTransaction,
     addDebt,
   } = useData();
+  const { showToast } = useToast();
   const [month, setMonth] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
@@ -70,7 +72,11 @@ export default function CalendarPage() {
 
   async function handleDeleteTx() {
     if (!delTx) return;
-    await deleteTransaction(delTx.id);
+    try {
+      await deleteTransaction(delTx.id);
+    } catch (e) {
+      showToast(e.message || 'Gagal menghapus');
+    }
     setDelTx(null);
   }
 
