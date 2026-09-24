@@ -10,6 +10,8 @@ import ConfirmDialog from '../common/ConfirmDialog';
 import ReceiptManageSheet from './ReceiptManageSheet';
 import RemainderSheet from './RemainderSheet';
 import ReceiptSheet from './ReceiptSheet';
+import ExtensionSheet from './ExtensionSheet';
+import PelunasanRestSheet from './PelunasanRestSheet';
 import CloseProjectSheet from './CloseProjectSheet';
 import SettleProjectSheet from './SettleProjectSheet';
 import ProjectForm from './ProjectForm';
@@ -18,6 +20,8 @@ import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { projectSummary } from '../../utils/projectSchedule';
 import { isSettled, isShort, rowCarriedIn, rowDue, rowReceived, rowRemaining, rowState } from '../../utils/paymentStatus';
 import { applyReopenRemainder } from '../../utils/remainderOps';
+import { extensionOptions, undoCheck } from '../../utils/extension';
+import { rolloverSource } from '../../utils/rollover';
 import {
   IcChevronLeft,
   IcCalendar,
@@ -54,6 +58,7 @@ function PaymentRow({
   onManage,
   onRemainder,
   onReopen,
+  onSettleFinal,
   canReceive,
   editable,
   accountName,
@@ -73,8 +78,11 @@ function PaymentRow({
   // shortfall (reason 'legacy') still reads as plain Lunas and is reopened
   // from its payment instead.
   const closure = payment.closure;
-  const closedBy =
-    closure?.kind === 'carry' ? 'carry' : closure?.kind === 'waive' && closure.reason !== 'legacy' ? 'waive' : null;
+  const closedBy = ['carry', 'extend', 'rollover'].includes(closure?.kind)
+    ? closure.kind
+    : closure?.kind === 'waive' && closure.reason !== 'legacy'
+      ? 'waive'
+      : null;
   const reopenable =
     editable && (closure?.kind === 'carry' || (closure?.kind === 'waive' && closure.reason === 'manual'));
   // Earlier months carried onto this one ("+ tunggakan bulan k").
@@ -88,6 +96,8 @@ function PaymentRow({
   // What is left on a bagi hasil that is due or already partly paid can be
   // carried or forgiven. The pelunasan gets its own options in Part C.
   const canSettleRest = canReceive && !isPaid && !isFinal && (received > 0 || days <= 0);
+  // A pelunasan paid in part: what happens to the rest (spec 7.2).
+  const canSettleFinal = canReceive && isFinal && !isPaid && received > 0;
   // A settled tagihan paid in one arrival shows it on its own line and opens
   // it from Edit. Otherwise, and on a closed row, every arrival is listed.
   const showArrivals = arrivals.length > 1 || (arrivals.length === 1 && (!isPaid || !!closedBy));
@@ -100,6 +110,10 @@ function PaymentRow({
       received > 0
         ? `Diterima ${recv ? formatDate(recv, { short: true }) : '—'} · sisa ${formatCurrency(closure.amount, false)} tidak ditagih`
         : `${formatCurrency(closure.amount, false)} tidak ditagih lagi`;
+  } else if (closedBy === 'extend') {
+    subtitle = `Diterima ${recv ? formatDate(recv, { short: true }) : '—'} · sisa ${formatCurrency(closure.amount, false)} diperpanjang`;
+  } else if (closedBy === 'rollover') {
+    subtitle = `Diterima ${recv ? formatDate(recv, { short: true }) : '—'} · sisa ${formatCurrency(closure.amount, false)} jadi kontrak baru`;
   } else if (isPaid) {
     subtitle = `Diterima ${recv ? formatDate(recv, { short: true }) : '—'}`;
   } else {
@@ -143,6 +157,8 @@ function PaymentRow({
               ))}
             {closedBy === 'carry' && <Pill tone="neutral">Digabung ke bulan {closure.toNo}</Pill>}
             {closedBy === 'waive' && <Pill tone="neutral">Dianggap lunas</Pill>}
+            {closedBy === 'extend' && <Pill tone="neutral">Diperpanjang</Pill>}
+            {closedBy === 'rollover' && <Pill tone="neutral">Kontrak baru</Pill>}
           </div>
           <div className="text-[12px] text-ink-mute mt-0.5">{subtitle}</div>
           {carriedIn.map((c) => (
@@ -176,6 +192,15 @@ function PaymentRow({
               className="mt-1 text-[12px] font-semibold text-ink-soft active:opacity-70 block ml-auto"
             >
               Atur sisa →
+            </button>
+          )}
+          {canSettleFinal && (
+            <button
+              type="button"
+              onClick={onSettleFinal}
+              className="mt-1 text-[12px] font-semibold text-ink-soft active:opacity-70 block ml-auto"
+            >
+              Atur sisa pelunasan →
             </button>
           )}
           {isPaid && reopenable && (
@@ -256,11 +281,27 @@ function reopenPreview(project, no) {
   return { ok: true, message: `Sisa ${formatCurrency(c.amount)} kembali ditagih di bulan ${no}.${active}` };
 }
 
+// One schedule change, in the owner's words.
+function extensionLabel(e) {
+  const on = e.at ? ` pada ${formatDate(e.at)}` : '';
+  return e.kind === 'mundur'
+    ? `Pelunasan dimundurkan ${e.months} bulan${on}`
+    : `Sisa pelunasan ${formatCurrency(e.baseAmount)} diperpanjang ${e.months} bulan${on}`;
+}
+
+// What undoing the latest schedule change does.
+function undoMessage(e) {
+  if (!e) return '';
+  return e.kind === 'mundur'
+    ? 'Bulan-bulan tambahan dihapus dan pelunasan kembali ke jatuh tempo semula.'
+    : `Bulan-bulan tambahan dihapus dan sisa pelunasan ${formatCurrency(e.baseAmount)} kembali ditagih di pelunasan lama.`;
+}
+
 export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDemo } = useDemo();
-  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, closeProjectAsDefault, settleProjectEarly, deleteProject, updateProject } =
+  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, deleteProject, updateProject } =
     useData();
   const [managing, setManaging] = useState(null); // a receipt id, or null when closed
   const [remainderNo, setRemainderNo] = useState(null); // a tagihan number, or null when closed
@@ -271,6 +312,11 @@ export default function ProjectDetail() {
   const [settling, setSettling] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [extending, setExtending] = useState(null); // 'mundur' | 'sisa', or null when closed
+  const [restOpen, setRestOpen] = useState(false);
+  const [askRestFor, setAskRestFor] = useState(null); // a receipt that left the pelunasan partly paid
+  const [rollingOver, setRollingOver] = useState(false);
+  const [undoingExtension, setUndoingExtension] = useState(null); // an extension id, or null
 
   const base = isDemo ? '/demo' : '';
   const project = projects.find((p) => p.id === id);
@@ -297,7 +343,23 @@ export default function ProjectDetail() {
     0
   ); // received side
   const totalReturnReceived = summary.receivedSoFar;
-  const profit = totalReturnReceived - (project.disbursedAmount || 0);
+  // Received, plus what went into a new contract, minus modal (spec 7.4).
+  const profit = summary.netCashChange;
+  const extOptions = extensionOptions(project);
+  const extensions = project.extensions || [];
+  const latestExtension = extensions[extensions.length - 1] || null;
+  const canUndoExtension = isActive && !!latestExtension && undoCheck(project).ok;
+  const rollover = rolloverSource(project);
+  // Asked once the screen shows the payment that left the pelunasan partly
+  // paid (spec 7.2).
+  const askRest = askRestFor != null && (project.receipts || []).some((r) => r.id === askRestFor);
+  const isRolloverProject = project.fundingMode === 'rollover';
+  const nextContract = project.rolledOverToProjectId
+    ? projects.find((p) => p.id === project.rolledOverToProjectId)
+    : null;
+  const prevContract = project.rolledFromProjectId
+    ? projects.find((p) => p.id === project.rolledFromProjectId)
+    : null;
   // Return rate display: tiered projects show both rates, else the single rate.
   const rTier1 = project.returnPctTier1 != null ? project.returnPctTier1 : project.monthlyReturnPct;
   const rTier2 = project.returnPctTier2 != null ? project.returnPctTier2 : rTier1;
@@ -307,7 +369,8 @@ export default function ProjectDetail() {
     : `${rTier1}% · ${formatCurrency((project.principalAmount * rTier1) / 100)}`;
 
   async function handleReceipt(data) {
-    await recordReceipt(project.id, data);
+    const out = await recordReceipt(project.id, data);
+    if (out?.finalShort) setAskRestFor(out.receiptId);
   }
 
   async function handleClose(data) {
@@ -372,6 +435,7 @@ export default function ProjectDetail() {
         <div className="text-[12px] text-ink-soft mt-1">
           Sudah terima {formatCurrency(summary.receivedSoFar)} dari modal{' '}
           {formatCurrency(project.disbursedAmount)}
+          {summary.rolledOut > 0 && ` · ${formatCurrency(summary.rolledOut)} dialihkan ke kontrak baru`}
         </div>
       </Card>
 
@@ -400,7 +464,7 @@ export default function ProjectDetail() {
           value={formatCurrency(project.principalAmount)}
         />
         <StatRow
-          label="Modal Keluar"
+          label={isRolloverProject ? 'Modal Dialihkan' : 'Modal Keluar'}
           value={formatCurrency(project.disbursedAmount)}
         />
         {project.principalAmount !== project.disbursedAmount && (
@@ -423,7 +487,7 @@ export default function ProjectDetail() {
         />
         <StatRow
           label="Rekening Sumber"
-          value={accountName(project.sourceAccountId)}
+          value={isRolloverProject ? 'Tidak ada (dialihkan)' : accountName(project.sourceAccountId)}
         />
         <StatRow
           label="Total Diterima"
@@ -460,6 +524,26 @@ export default function ProjectDetail() {
           <span>→</span>
         </a>
       )}
+      {project.rolledOverToProjectId && (
+        <Link
+          to={`${base}/project/${project.rolledOverToProjectId}`}
+          className="flex items-center gap-2 px-4 py-3 mb-3.5 bg-paper border border-line rounded-2xl text-[13px] text-indigo font-semibold active:bg-cream-deep"
+        >
+          <IcInfo size={16} sw={1.9} />
+          <span className="flex-1 truncate">Dilanjutkan ke kontrak baru: {nextContract?.name || 'project baru'}</span>
+          <span>→</span>
+        </Link>
+      )}
+      {project.rolledFromProjectId && (
+        <Link
+          to={`${base}/project/${project.rolledFromProjectId}`}
+          className="flex items-center gap-2 px-4 py-3 mb-3.5 bg-paper border border-line rounded-2xl text-[13px] text-indigo font-semibold active:bg-cream-deep"
+        >
+          <IcInfo size={16} sw={1.9} />
+          <span className="flex-1 truncate">Lanjutan dari: {prevContract?.name || 'project lama'}</span>
+          <span>→</span>
+        </Link>
+      )}
 
       <SectionTitle>Jadwal Pembayaran</SectionTitle>
       <Card className="mb-3.5 !px-4 !py-1">
@@ -472,6 +556,7 @@ export default function ProjectDetail() {
             onManage={(receiptId) => setManaging(receiptId)}
             onRemainder={(no) => setRemainderNo(no)}
             onReopen={(no) => setReopenNo(no)}
+            onSettleFinal={() => setRestOpen(true)}
             canReceive={isActive}
             editable={isActive || isCompleted}
             accountName={accountName}
@@ -479,6 +564,28 @@ export default function ProjectDetail() {
           />
         ))}
       </Card>
+      {extensions.length > 0 && (
+        <>
+          <SectionTitle>Perubahan Jadwal</SectionTitle>
+          <Card className="mb-3.5 !px-4 !py-1">
+            {extensions.map((e, i) => (
+              <div key={e.id} className={`py-2.5 ${i < extensions.length - 1 ? 'border-b border-line-soft' : ''}`}>
+                <div className="text-[13px] text-ink">{extensionLabel(e)}</div>
+                {e.note && <div className="text-[12px] text-ink-mute mt-0.5">{e.note}</div>}
+                {e === latestExtension && canUndoExtension && (
+                  <button
+                    type="button"
+                    onClick={() => setUndoingExtension(e.id)}
+                    className="mt-1 text-[12px] font-semibold text-terra active:opacity-70"
+                  >
+                    Batalkan perpanjangan
+                  </button>
+                )}
+              </div>
+            ))}
+          </Card>
+        </>
+      )}
 
       {isActive && (
         <div className="space-y-2 mb-3.5">
@@ -516,6 +623,15 @@ export default function ProjectDetail() {
               Tutup: Macet
             </button>
           </div>
+          {extOptions.mundur.ok && (
+            <button
+              type="button"
+              onClick={() => setExtending('mundur')}
+              className="w-full py-3 rounded-xl bg-emas-soft text-ink font-semibold text-[14px] active:opacity-80"
+            >
+              Mundurkan pelunasan
+            </button>
+          )}
         </div>
       )}
 
@@ -584,21 +700,85 @@ export default function ProjectDetail() {
         accounts={accounts}
         onConfirm={handleSettle}
       />
+      <PelunasanRestSheet
+        open={restOpen || askRest}
+        onClose={() => {
+          setRestOpen(false);
+          setAskRestFor(null);
+        }}
+        project={project}
+        onExtend={() => {
+          setRestOpen(false);
+          setAskRestFor(null);
+          setExtending('sisa');
+        }}
+        onRollover={() => {
+          setRestOpen(false);
+          setAskRestFor(null);
+          setRollingOver(true);
+        }}
+      />
+      <ExtensionSheet
+        open={extending !== null}
+        onClose={() => setExtending(null)}
+        project={project}
+        kind={extending}
+        onSubmit={(data) => extendProject(project.id, data)}
+      />
+      <ConfirmDialog
+        open={undoingExtension !== null}
+        onClose={() => setUndoingExtension(null)}
+        onConfirm={async () => {
+          try {
+            await undoExtension(project.id, {
+              extensionId: undoingExtension,
+              seenWriteId: project.lastWriteId ?? null,
+            });
+          } catch (e) {
+            showToast(e.message || 'Gagal membatalkan perpanjangan');
+          }
+        }}
+        title="Batalkan perpanjangan?"
+        message={undoMessage(latestExtension)}
+        confirmLabel="Ya, batalkan"
+      />
+      {rollover.ok && (
+        <ProjectForm
+          key={`rollover-${project.id}`}
+          open={rollingOver}
+          onClose={() => setRollingOver(false)}
+          onSubmit={async (data) => {
+            const newId = await rolloverProject(project.id, data, { seenWriteId: project.lastWriteId ?? null });
+            setRollingOver(false);
+            if (newId) navigate(`${base}/project/${newId}`);
+          }}
+          accounts={accounts}
+          rollover={{ from: project, amount: rollover.amount, startDate: rollover.startDate }}
+        />
+      )}
       <ConfirmDialog
         open={deleting}
         onClose={() => setDeleting(false)}
         onConfirm={handleDelete}
         title="Batalkan Project?"
         message={
-          totalReturnReceived > 0
-            ? `Modal ${formatCurrency(project.disbursedAmount)} dikembalikan ke ${accountName(
-                project.sourceAccountId
-              )}, dan return ${formatCurrency(
-                totalReturnReceived
-              )} yang sudah diterima ditarik kembali dari rekening. Project & semua transaksi terkait dihapus permanen.`
-            : `Modal ${formatCurrency(project.disbursedAmount)} dikembalikan ke ${accountName(
-                project.sourceAccountId
-              )}. Project & semua transaksi terkait dihapus permanen.`
+          isRolloverProject
+            ? `Kontrak lanjutan ini dihapus dan sisa pelunasan ${formatCurrency(project.disbursedAmount)} kembali ditagih di ${
+                prevContract?.name || 'project lama'
+              }.${
+                totalReturnReceived > 0
+                  ? ` Pembayaran ${formatCurrency(totalReturnReceived)} yang sudah masuk ditarik kembali dari rekening.`
+                  : ''
+              } Transaksi terkait dihapus permanen.`
+            : totalReturnReceived > 0
+              ? `Modal ${formatCurrency(project.disbursedAmount)} dikembalikan ke ${accountName(
+                  project.sourceAccountId
+                )}, dan return ${formatCurrency(
+                  totalReturnReceived
+                )} yang sudah diterima ditarik kembali dari rekening. Project & semua transaksi terkait dihapus permanen.`
+              : `Modal ${formatCurrency(project.disbursedAmount)} dikembalikan ke ${accountName(
+                  project.sourceAccountId
+                )}. Project & semua transaksi terkait dihapus permanen.`
         }
         confirmLabel="Ya, Batalkan"
       />
