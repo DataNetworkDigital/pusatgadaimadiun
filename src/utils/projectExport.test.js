@@ -3,6 +3,7 @@ import { PROJECT_COLUMNS, COLLECTION_COLUMNS, defaultKeys, pickColumns, pdfLayou
 import { formatCurrency } from './formatCurrency';
 import {
   projectSheetRows, projectsToPdfRows, emptyPdfRow, projectsTouchedByFilter, scheduleSheetRows,
+  collectionRows,
 } from './projectExport';
 
 // Two projects: one active with every relevant field present, one completed
@@ -209,5 +210,32 @@ describe('period-filtered exports follow each arrival', () => {
       [3, 5_500_000],
       [4, 5_500_000],
     ]);
+  });
+});
+
+describe('closed remainders in the exports', () => {
+  const past = (m) => new Date(2026, m, 5);
+  const project = {
+    id: 'p', name: 'Toko', status: 'active',
+    payments: [
+      { no: 1, type: 'interest', expectedAmount: 5_500_000, dueDate: past(6), closure: { kind: 'carry', amount: 2_500_000, toNo: 2 } },
+      { no: 2, type: 'interest', expectedAmount: 5_500_000, dueDate: past(7) },
+      { no: 3, type: 'interest', expectedAmount: 5_500_000, dueDate: past(8), closure: { kind: 'waive', amount: 5_500_000, reason: 'manual' } },
+    ],
+    receipts: [{ id: 'a', amount: 3_000_000, date: past(6), accountId: 'bca', allocations: [{ no: 1, amount: 3_000_000 }] }],
+  };
+
+  it('leaves a carried month out of the Daftar Tagihan and asks for it on the month it moved to', () => {
+    const rows = collectionRows([project], null);
+    expect(rows).toHaveLength(2);
+    const second = rows.find((r) => r.status !== 'Dianggap lunas');
+    expect(second.amount).toBe(8_000_000);
+    expect(rows.some((r) => r.status === 'Dianggap lunas')).toBe(true);
+  });
+
+  it('says how a closed month ended on the Jadwal sheet', () => {
+    const lines = scheduleSheetRows([project], () => 'BCA', null);
+    expect(lines[0].Status).toBe('Digabung ke bln 2');
+    expect(lines[2].Status).toBe('Dianggap lunas');
   });
 });

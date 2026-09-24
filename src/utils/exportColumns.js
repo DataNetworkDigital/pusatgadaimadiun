@@ -6,6 +6,7 @@ import {
   projectEndFromDuration,
   resolveTiers,
 } from './projectSchedule';
+import { isShort, rowRemaining } from './paymentStatus';
 
 const STATUS_LABEL = {
   active: 'Aktif',
@@ -37,6 +38,13 @@ export function formatTierPct(project) {
 // Each column: `value` feeds Excel (numbers stay numbers), `text` feeds the PDF
 // (always a string). `width` is the PDF column width in mm. Every selected
 // column with `flex: true` shares the leftover page width evenly.
+// What a borrower is short on tagihan he started paying and that are due.
+function shortfallOf(p) {
+  return (p.payments || [])
+    .filter((row) => isShort(p, row))
+    .reduce((s, row) => s + rowRemaining(p, row), 0);
+}
+
 export const PROJECT_COLUMNS = [
   { key: 'no', label: 'No', defaultOn: true, width: 8, align: 'right',
     value: (p, ctx) => ctx.index + 1 },
@@ -81,6 +89,9 @@ export const PROJECT_COLUMNS = [
   { key: 'remaining', label: 'Sisa Tagihan', defaultOn: true, width: 24, align: 'right',
     value: (p) => projectSummary(p).expectedRemaining,
     text: (p) => formatCurrency(projectSummary(p).expectedRemaining) },
+  { key: 'shortfall', label: 'Kurang Bayar', defaultOn: false, width: 24, align: 'right',
+    value: (p) => shortfallOf(p),
+    text: (p) => formatCurrency(shortfallOf(p)) },
   { key: 'net', label: 'Net', defaultOn: true, width: 24, align: 'right',
     value: (p) => projectSummary(p).netCashChange,
     text: (p) => formatCurrency(projectSummary(p).netCashChange) },

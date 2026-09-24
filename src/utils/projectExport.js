@@ -22,8 +22,11 @@ function sheetColWidths(picked) {
 
 // Kurang is a warning, so it is kept for tagihan already due; a tagihan paid
 // partly ahead of its due date reads Sebagian. Both still count as not paid.
+// A month closed without money says how.
 function paymentStatusLabel(p, pay, paidLabel) {
-  if (isSettled(p, pay)) return paidLabel;
+  const c = pay.closure;
+  if (c?.kind === 'carry') return `Digabung ke bln ${c.toNo}`;
+  if (isSettled(p, pay)) return c?.kind === 'waive' && c.reason !== 'legacy' ? 'Dianggap lunas' : paidLabel;
   if (rowReceived(p, pay) > 0) return isShort(p, pay) ? 'Kurang' : 'Sebagian';
   return 'Belum';
 }
@@ -225,7 +228,7 @@ export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = n
 // One row per scheduled payment whose DUE DATE falls in the range (all
 // statuses), so the collector knows who / when / where to collect.
 
-function collectionRows(projects, filter) {
+export function collectionRows(projects, filter) {
   const rows = [];
   projects.forEach((p) => {
     const startStr = p.startDate ? formatDate(p.startDate) : '';
@@ -234,6 +237,8 @@ function collectionRows(projects, filter) {
     const durasi = Number(p.durationMonths) || 0;
     (p.payments || []).forEach((pay) => {
       if (!pay.dueDate) return;
+      // A carried month is asked for on the month it moved to.
+      if (pay.closure?.kind === 'carry') return;
       if (filter && !inDateRange(pay.dueDate, filter)) return;
       const paid = isSettled(p, pay);
       rows.push({

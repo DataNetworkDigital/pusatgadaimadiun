@@ -252,3 +252,25 @@ describe('COLLECTION_COLUMNS', () => {
     expect(defaultKeys(COLLECTION_COLUMNS)).toEqual(COLLECTION_COLUMNS.map((c) => c.key));
   });
 });
+
+describe('Kurang Bayar column', () => {
+  it('exists, is off by default, and sums what due, partly paid tagihan still lack', () => {
+    const col = PROJECT_COLUMNS.find((c) => c.key === 'shortfall');
+    expect(col.label).toBe('Kurang Bayar');
+    expect(col.defaultOn).toBe(false);
+    const past = new Date(2020, 0, 5);
+    const future = new Date(2099, 0, 5);
+    const p = {
+      payments: [
+        { no: 1, type: 'interest', expectedAmount: 1000, dueDate: past },
+        { no: 2, type: 'interest', expectedAmount: 1000, dueDate: future },
+        { no: 3, type: 'interest', expectedAmount: 1000, dueDate: past },
+      ],
+      receipts: [
+        { id: 'a', amount: 400, allocations: [{ no: 1, amount: 400 }] },
+        { id: 'b', amount: 300, allocations: [{ no: 2, amount: 300 }] },
+      ],
+    };
+    expect(col.value(p, {})).toBe(600);
+  });
+});
