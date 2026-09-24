@@ -118,4 +118,11 @@ describe('recomputeUnpaidSchedule when money has already arrived', () => {
     const rows = withPaid(6, { 1: 5_500_000, 5: 1_500_000 });
     expect(() => recomputeUnpaidSchedule(rows, terms(4))).toThrow(/bulan 5/);
   });
+
+  it('refuses to shorten past a month a tunggakan was carried onto', () => {
+    const rows = generateProjectSchedule(terms(6)).map((r) =>
+      r.no === 2 ? { ...r, closure: { kind: 'carry', amount: 5_500_000, toNo: 5 } } : r
+    );
+    expect(() => recomputeUnpaidSchedule(rows, terms(4))).toThrow(/tunggakan yang digabung ke bulan 5/);
+  });
 });

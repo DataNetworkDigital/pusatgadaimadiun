@@ -99,6 +99,17 @@ export function recomputeUnpaidSchedule(existingPayments, {
     }
   }
 
+  // A tunggakan carried onto a later month lives on that month's number;
+  // shortening past it would drop the debt with the row.
+  for (const p of existingPayments || []) {
+    const c = p?.closure;
+    if (c?.kind === 'carry' && c.toNo > months) {
+      throw new Error(
+        `Durasi tidak bisa dipendekkan ke ${months} bulan karena ada tunggakan yang digabung ke bulan ${c.toNo}.`
+      );
+    }
+  }
+
   const payments = [];
   for (let i = 1; i <= months; i++) {
     const isLast = i === months;
