@@ -640,23 +640,67 @@ export function DataProvider({ children }) {
   // instead can start from a stale receipts array when two devices save at
   // the same moment, and the second save would erase the first receipt while
   // its transaction and balance change survive; a transaction retries with
-  // the fresh document instead. It needs a connection: offline it fails at
-  // once, which beats showing a change that is not stored (the app keeps no
-  // offline cache, so such a change is lost when the app closes).
-  async function inProjectTransaction(projectId, work) {
+  // the fresh document instead.
+  //
+  // Each call carries a write id that the writer stores on the project as
+  // `lastWriteId`. After a connection error the SDK may run the transaction
+  // again; if the first commit did land and only its answer was lost, the
+  // rerun finds its own id and returns the first result instead of saving the
+  // same money twice.
+  //
+  // It needs a connection. Offline it gives up after a few retries (several
+  // seconds of "Menyimpan…") with a message that says whether anything could
+  // have been saved. The app keeps no offline cache, so a change shown before
+  // the server has it would be lost when the app closes.
+  async function inProjectTransaction(projectId, work, { missingOk = false } = {}) {
+    const writeId = doc(collection(db, C('projects'))).id;
+    let lastResult;
+    let reachedCommit = false;
     try {
       return await runTransaction(db, async (t) => {
+        reachedCommit = false;
         const ref = doc(db, C('projects'), projectId);
         const snap = await t.get(ref);
-        if (!snap.exists()) throw new Error('Project tidak ditemukan');
-        return work(t, normalizeProject({ id: snap.id, ...snap.data() }), ref);
+        if (!snap.exists()) {
+          // Gone already: deleted by this very call on an earlier attempt, or
+          // by another device. Only a delete may treat that as done.
+          if (missingOk) return lastResult;
+          throw new Error('Project tidak ditemukan');
+        }
+        const project = normalizeProject({ id: snap.id, ...snap.data() });
+        if (project.lastWriteId === writeId) return lastResult;
+        lastResult = await work(t, project, ref, writeId);
+        reachedCommit = true;
+        return lastResult;
       });
     } catch (e) {
-      if (e?.code === 'unavailable' || /offline/i.test(e?.message || '')) {
-        throw new Error('Koneksi internet terputus. Tidak ada yang tersimpan, coba lagi.', { cause: e });
-      }
-      throw e;
+      throw friendlyWriteError(e, reachedCommit);
     }
+  }
+
+  // Firestore's own errors are English and technical. The owner gets one that
+  // says what happened and whether anything was saved. Errors a writer threw
+  // itself are already in Indonesian and pass through unchanged.
+  function friendlyWriteError(e, reachedCommit) {
+    const code = e?.code;
+    if (code === 'unavailable' || code === 'deadline-exceeded' || /offline/i.test(e?.message || '')) {
+      return new Error(
+        reachedCommit
+          ? 'Koneksi internet terputus saat menyimpan. Cek dulu apakah perubahan sudah masuk sebelum mencoba lagi.'
+          : 'Koneksi internet terputus. Tidak ada yang tersimpan, coba lagi.',
+        { cause: e }
+      );
+    }
+    if (code === 'not-found') {
+      return new Error('Data yang dibutuhkan (misalnya rekening) sudah tidak ada. Tidak ada yang tersimpan.', { cause: e });
+    }
+    if (code === 'aborted' || code === 'failed-precondition') {
+      return new Error('Project ini sedang diubah dari perangkat lain. Tidak ada yang tersimpan, coba lagi.', { cause: e });
+    }
+    if (code === 'permission-denied') {
+      return new Error('Tidak punya izin menyimpan. Buka ulang aplikasi, lalu coba lagi.', { cause: e });
+    }
+    return e;
   }
 
   function receiptDescription(project, allocations) {
@@ -671,7 +715,9 @@ export function DataProvider({ children }) {
     if (!account) throw new Error('Pilih rekening tujuan');
     const recvDate = date instanceof Date ? date : new Date();
 
-    const count = await inProjectTransaction(projectId, (t, project, ref) => {
+    const count = await inProjectTransaction(projectId, (t, project, ref, writeId) => {
+      // Checked on the fresh read: another device may have closed it.
+      if (project.status !== 'active') throw new Error('Project ini sudah ditutup. Pembayaran tidak dicatat.');
       const { allocations, leftover } = allocateReceipt(project, amt, startNo);
       if (!allocations.length) {
         throw new Error('Tidak ada tagihan yang masih terbuka untuk dibayar');
@@ -732,7 +778,7 @@ export function DataProvider({ children }) {
       const after = { ...project, payments: updatedPayments, receipts };
       const allSettled =
         updatedPayments.length > 0 && updatedPayments.every((row) => isSettled(after, row));
-      const update = { payments: updatedPayments, receipts };
+      const update = { payments: updatedPayments, receipts, lastWriteId: writeId };
       if (allSettled && project.status === 'active') {
         update.status = 'completed';
         update.closedAt = Timestamp.fromDate(recvDate);
@@ -750,12 +796,25 @@ export function DataProvider({ children }) {
 
   async function updateReceipt(projectId, receiptId, { amount, date, account }) {
     if (!account) throw new Error('Pilih rekening tujuan');
-    const status = await inProjectTransaction(projectId, async (t, project, ref) => {
+    const status = await inProjectTransaction(projectId, async (t, project, ref, writeId) => {
       const receipt = (project.receipts || []).find((r) => r.id === receiptId);
       if (!receipt) throw new Error('Pembayaran tidak ditemukan');
-      // Reads before writes: a legacy receipt's transaction may be missing.
+      // Reads before writes. The receipt's transaction must still say what the
+      // receipt says: before this stage the Transaksi page could change or
+      // delete it, and moving balances by the receipt's figures would then
+      // count money twice or take it from the wrong account.
       const txRef = receipt.transactionId ? doc(db, C('transactions'), receipt.transactionId) : null;
       const txSnap = txRef ? await t.get(txRef) : null;
+      const tx = txSnap?.exists() ? txSnap.data() : null;
+      if (
+        !tx ||
+        (Number(tx.amount) || 0) !== (Number(receipt.amount) || 0) ||
+        (tx.toAccount || null) !== (receipt.accountId || null)
+      ) {
+        throw new Error(
+          'Transaksi pembayaran ini sudah diubah atau dihapus di halaman Transaksi, jadi tidak cocok lagi. Batalkan pembayaran ini, lalu catat ulang.'
+        );
+      }
 
       const recvDate = date instanceof Date ? date : toDate(receipt.date) || new Date();
       const at = Timestamp.fromDate(recvDate);
@@ -787,19 +846,17 @@ export function DataProvider({ children }) {
         creditResolved(t, target, amt);
       }
 
-      if (txSnap?.exists()) {
-        const monthsChanged =
-          allocations.map((a) => a.no).join() !== (receipt.allocations || []).map((a) => a.no).join();
-        t.update(txRef, {
-          amount: amt,
-          toAccount: target.id,
-          date: at,
-          paymentNo: allocations[0].no,
-          receiptId: receipt.id,
-          ...(monthsChanged ? { description: receiptDescription(project, allocations) } : {}),
-        });
-      }
-      t.update(ref, update);
+      const monthsChanged =
+        allocations.map((a) => a.no).join() !== (receipt.allocations || []).map((a) => a.no).join();
+      t.update(txRef, {
+        amount: amt,
+        toAccount: target.id,
+        date: at,
+        paymentNo: allocations[0].no,
+        receiptId: receipt.id,
+        ...(monthsChanged ? { description: receiptDescription(project, allocations) } : {}),
+      });
+      t.update(ref, { ...update, lastWriteId: writeId });
       return update.status;
     });
     toast(
@@ -812,13 +869,13 @@ export function DataProvider({ children }) {
   }
 
   async function moveReceipt(projectId, receiptId, startNo) {
-    const status = await inProjectTransaction(projectId, async (t, project, ref) => {
+    const status = await inProjectTransaction(projectId, async (t, project, ref, writeId) => {
       const receipt = (project.receipts || []).find((r) => r.id === receiptId);
       if (!receipt) throw new Error('Pembayaran tidak ditemukan');
       const txRef = receipt.transactionId ? doc(db, C('transactions'), receipt.transactionId) : null;
       const txSnap = txRef ? await t.get(txRef) : null;
 
-      const { update, allocations } = applyReceiptMove(project, receiptId, Number(startNo));
+      const { update, allocations } = applyReceiptMove(project, receiptId, startNo);
       if (txSnap?.exists()) {
         t.update(txRef, {
           paymentNo: allocations[0].no,
@@ -826,29 +883,44 @@ export function DataProvider({ children }) {
           receiptId: receipt.id,
         });
       }
-      t.update(ref, update);
+      t.update(ref, { ...update, lastWriteId: writeId });
       return update.status;
     });
-    toast(status === 'active' ? 'Pembayaran dipindah, project aktif lagi' : 'Pembayaran dipindah');
+    // A move can finish a project but never reopens one: on a completed
+    // project there is no open month to move to.
+    toast(status === 'completed' ? 'Pembayaran dipindah, project selesai' : 'Pembayaran dipindah');
   }
 
   async function cancelReceipt(projectId, receiptId) {
-    const status = await inProjectTransaction(projectId, (t, project, ref) => {
+    const outcome = await inProjectTransaction(projectId, async (t, project, ref, writeId) => {
       const receipt = (project.receipts || []).find((r) => r.id === receiptId);
       if (!receipt) throw new Error('Pembayaran tidak ditemukan');
+      // Reads before writes. The transaction, not the receipt, says where the
+      // money sits now: before this stage the Transaksi page could change it
+      // (then its figures are what the balance holds) or delete it (then its
+      // balance was already reversed). A deleted account cannot be debited.
+      const txRef = receipt.transactionId ? doc(db, C('transactions'), receipt.transactionId) : null;
+      const txSnap = txRef ? await t.get(txRef) : null;
+      const tx = txSnap?.exists() ? txSnap.data() : null;
+      const accRef = tx?.toAccount ? doc(db, C('accounts'), tx.toAccount) : null;
+      const accSnap = accRef ? await t.get(accRef) : null;
+
       const { update } = applyReceiptCancel(project, receiptId);
-      const amt = Number(receipt.amount) || 0;
-      if (receipt.accountId && amt) {
-        t.update(doc(db, C('accounts'), receipt.accountId), {
-          balance: increment(-amt),
-          updatedAt: serverTimestamp(),
-        });
+      const amt = Number(tx?.amount) || 0;
+      const balanceMoved = !!accSnap?.exists() && amt !== 0;
+      if (balanceMoved) {
+        t.update(accRef, { balance: increment(-amt), updatedAt: serverTimestamp() });
       }
-      if (receipt.transactionId) t.delete(doc(db, C('transactions'), receipt.transactionId));
-      t.update(ref, update);
-      return update.status;
+      if (tx) t.delete(txRef);
+      t.update(ref, { ...update, lastWriteId: writeId });
+      return { status: update.status, balanceMoved };
     });
-    toast(status === 'active' ? 'Pembayaran dibatalkan, project aktif lagi' : 'Pembayaran dibatalkan');
+    const base = outcome?.status === 'active' ? 'Pembayaran dibatalkan, project aktif lagi' : 'Pembayaran dibatalkan';
+    toast(
+      outcome && !outcome.balanceMoved
+        ? `${base}. Saldo tidak diubah karena transaksi atau rekeningnya sudah tidak ada`
+        : base
+    );
   }
 
   async function closeProjectAsDefault(projectId, { recoveredAmount = 0, accountId, date } = {}) {
@@ -856,7 +928,9 @@ export function DataProvider({ children }) {
     if (recv > 0 && !accountId) throw new Error('Pilih rekening tujuan untuk pengembalian');
     const closeDate = date instanceof Date ? date : new Date();
 
-    const lossAmount = await inProjectTransaction(projectId, (t, project, ref) => {
+    const lossAmount = await inProjectTransaction(projectId, (t, project, ref, writeId) => {
+      // Checked on the fresh read: another device may have closed it.
+      if (project.status !== 'active') throw new Error('Project ini sudah ditutup.');
       let recoveryTxId = null;
       if (recv > 0) {
         const creditedTo = creditMoneyIn(t, accountId, recv);
@@ -883,6 +957,7 @@ export function DataProvider({ children }) {
         finalRecovery: recv,
         finalRecoveryTransactionId: recoveryTxId,
         lossAmount: loss,
+        lastWriteId: writeId,
       });
       return loss;
     });
@@ -900,7 +975,9 @@ export function DataProvider({ children }) {
     const settleDate = date instanceof Date ? date : new Date();
     const at = Timestamp.fromDate(settleDate);
 
-    await inProjectTransaction(projectId, (t, project, ref) => {
+    await inProjectTransaction(projectId, (t, project, ref, writeId) => {
+      // Checked on the fresh read: another device may have closed it.
+      if (project.status !== 'active') throw new Error('Project ini sudah ditutup. Pelunasan tidak dicatat.');
       const creditedTo = creditMoneyIn(t, accountId, amt);
       const txRef = doc(collection(db, C('transactions')));
 
@@ -933,6 +1010,7 @@ export function DataProvider({ children }) {
         status: 'completed',
         closedAt: at,
         settledEarly: true,
+        lastWriteId: writeId,
       });
     });
     toast('Project dilunasi lebih cepat');
@@ -945,52 +1023,61 @@ export function DataProvider({ children }) {
   // - Delete the project and all its related transactions
   async function deleteProject(id) {
     if (!projects.some((p) => p.id === id)) return;
-    const clawedBack = await inProjectTransaction(id, async (t, project, ref) => {
-      // Reads first (a transaction allows no read after a write): the recovery
-      // transaction says which account the macet recovery landed in.
-      const recoveryRef = project.finalRecoveryTransactionId
-        ? doc(db, C('transactions'), project.finalRecoveryTransactionId)
-        : null;
-      const recoverySnap = recoveryRef ? await t.get(recoveryRef) : null;
-
-      // One balance change per account, however many arrivals landed there.
-      const deltas = new Map();
-      const move = (accountId, amount) => {
-        if (!accountId || !amount) return;
-        deltas.set(accountId, (deltas.get(accountId) || 0) + amount);
-      };
-
-      // 1. Return the funding to the source account, delete its transaction.
-      if (project.fundingTransactionId) {
-        t.delete(doc(db, C('transactions'), project.fundingTransactionId));
-      }
-      move(project.sourceAccountId, Number(project.disbursedAmount) || 0);
-
-      // 2. Claw back every arrival from the account it landed in. Walks
-      // receipts, not rows: a tagihan paid several times has several.
-      for (const r of project.receipts || []) {
-        if (r?.transactionId) t.delete(doc(db, C('transactions'), r.transactionId));
-        move(r?.accountId, -(Number(r?.amount) || 0));
-      }
-
-      // 3. Reverse any recovery booked when the project was closed as macet.
-      if (recoveryRef) {
-        t.delete(recoveryRef);
-        const to = recoverySnap?.exists() ? recoverySnap.data().toAccount : null;
-        move(to, -(Number(project.finalRecovery) || 0));
-      }
-
-      for (const [accountId, amount] of deltas) {
-        if (amount !== 0) {
-          t.update(doc(db, C('accounts'), accountId), {
-            balance: increment(amount),
-            updatedAt: serverTimestamp(),
-          });
+    const clawedBack = await inProjectTransaction(
+      id,
+      async (t, project, ref) => {
+        // Reads first (a transaction allows no read after a write). What each
+        // transaction says is what actually moved the balances, so that is
+        // what gets reversed: before this stage the Transaksi page could
+        // change or delete project transactions without the project knowing.
+        const read = async (collectionName, docId) => {
+          if (!docId) return null;
+          const docRef = doc(db, C(collectionName), docId);
+          const snap = await t.get(docRef);
+          return snap.exists() ? { ref: docRef, data: snap.data() } : null;
+        };
+        const funding = await read('transactions', project.fundingTransactionId);
+        const arrivals = [];
+        for (const r of project.receipts || []) {
+          const tx = await read('transactions', r?.transactionId);
+          if (tx) arrivals.push(tx);
         }
-      }
-      t.delete(ref);
-      return projectReceivedTotal(project);
-    });
+        const recovery = await read('transactions', project.finalRecoveryTransactionId);
+
+        // One balance change per account, however many transactions touched it.
+        const deltas = new Map();
+        const move = (accountId, amount) => {
+          if (!accountId || !amount) return;
+          deltas.set(accountId, (deltas.get(accountId) || 0) + amount);
+        };
+        // 1. The modal goes back to the account it left from. A project with no
+        // funding transaction on record at all falls back to its own fields.
+        if (funding) move(funding.data.fromAccount, Number(funding.data.amount) || 0);
+        else if (!project.fundingTransactionId) move(project.sourceAccountId, Number(project.disbursedAmount) || 0);
+        // 2. Every arrival comes back out of the account it landed in.
+        for (const tx of arrivals) move(tx.data.toAccount, -(Number(tx.data.amount) || 0));
+        // 3. So does a macet recovery.
+        if (recovery) move(recovery.data.toAccount, -(Number(recovery.data.amount) || 0));
+
+        // An account deleted since cannot be updated; its share is skipped.
+        const accountWrites = [];
+        for (const [accountId, amount] of deltas) {
+          if (amount === 0) continue;
+          const account = await read('accounts', accountId);
+          if (account) accountWrites.push({ accRef: account.ref, amount });
+        }
+
+        for (const tx of [funding, ...arrivals, recovery]) {
+          if (tx) t.delete(tx.ref);
+        }
+        for (const { accRef, amount } of accountWrites) {
+          t.update(accRef, { balance: increment(amount), updatedAt: serverTimestamp() });
+        }
+        t.delete(ref);
+        return projectReceivedTotal(project);
+      },
+      { missingOk: true }
+    );
     toast(clawedBack > 0 ? 'Project dibatalkan, modal & return dikembalikan' : 'Project dibatalkan, modal dikembalikan');
   }
 
