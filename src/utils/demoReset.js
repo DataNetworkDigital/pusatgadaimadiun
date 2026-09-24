@@ -1,5 +1,5 @@
 import {
-  collection, doc, getDocs, runTransaction, updateDoc, writeBatch, serverTimestamp,
+  collection, doc, getDoc, getDocs, runTransaction, writeBatch, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { buildDemoSeed } from './demoSeedData';
@@ -37,15 +37,15 @@ async function clearCollection(name) {
   }
 }
 
-async function seed() {
+// Writes today's demo records through `writer` (the refill's transaction).
+function writeSeed(writer) {
   const { accounts, transactions, debts, reminders, projects } = buildDemoSeed();
-  const batch = writeBatch(db);
 
   const accountKeyToId = {};
   for (const acc of accounts) {
     const ref = doc(collection(db, 'demo_accounts'));
     accountKeyToId[acc.key] = ref.id;
-    batch.set(ref, {
+    writer.set(ref, {
       name: acc.name,
       accountNumber: acc.accountNumber,
       balance: acc.balance,
@@ -56,7 +56,7 @@ async function seed() {
 
   for (const tx of transactions) {
     const ref = doc(collection(db, 'demo_transactions'));
-    batch.set(ref, {
+    writer.set(ref, {
       type: tx.type,
       amount: tx.amount,
       description: tx.description,
@@ -70,7 +70,7 @@ async function seed() {
 
   for (const d of debts) {
     const ref = doc(collection(db, 'demo_debts'));
-    batch.set(ref, {
+    writer.set(ref, {
       type: d.type,
       personName: d.personName,
       totalAmount: d.totalAmount,
@@ -86,7 +86,7 @@ async function seed() {
 
   for (const r of reminders) {
     const ref = doc(collection(db, 'demo_reminders'));
-    batch.set(ref, {
+    writer.set(ref, {
       type: r.type === 'income' ? 'income' : 'expense',
       title: r.title,
       dayOfMonth: r.dayOfMonth,
@@ -107,7 +107,7 @@ async function seed() {
       accountIdOf: (key) => (key ? accountKeyToId[key] : null),
     });
     for (const { id, ...tx } of ledger.transactions) {
-      batch.set(doc(db, 'demo_transactions', id), { ...tx, createdAt: serverTimestamp() });
+      writer.set(doc(db, 'demo_transactions', id), { ...tx, createdAt: serverTimestamp() });
     }
     const payments = ledger.payments.map((pay) => ({
       no: pay.no,
@@ -145,16 +145,48 @@ async function seed() {
       createdAt: p.createdAt || serverTimestamp(),
     };
     if (p.closedAt) data.closedAt = p.closedAt;
-    batch.set(ref, data);
+    writer.set(ref, data);
   }
 
-  await batch.commit();
+}
+
+// A refill that was taken over (see ensureDemoFresh) stops instead of
+// landing next to the newer one.
+class TakenOver extends Error {}
+
+// Whether this visit's claim on today's refill is still the current one.
+async function stillMine(settingsRef, resetId) {
+  const snap = await getDoc(settingsRef);
+  return snap.exists() && snap.data().resetId === resetId;
+}
+
+// The seed and the "done" flag land together, and only while this visit's
+// claim is current: if a slow refill was taken over meanwhile, the newer one
+// alone fills the demo.
+async function seed(settingsRef, resetId) {
+  await runTransaction(db, async (txn) => {
+    const snap = await txn.get(settingsRef);
+    if (!snap.exists() || snap.data().resetId !== resetId) throw new TakenOver();
+    writeSeed(txn);
+    txn.update(settingsRef, { resetInProgress: false });
+  });
+}
+
+// Give the day back after a failed refill, unless another visit has taken it.
+async function releaseClaim(settingsRef, resetId) {
+  await runTransaction(db, async (txn) => {
+    const snap = await txn.get(settingsRef);
+    if (snap.exists() && snap.data().resetId === resetId) {
+      txn.update(settingsRef, { lastResetDate: '2020-01-01', resetInProgress: false });
+    }
+  });
 }
 
 // Today's claim on the reset, or what to do instead (see demoResetDecision).
 // Returns the decision and the id of the claim it saw running, if any.
 async function claimReset(settingsRef, todayStr, stalledId) {
   return runTransaction(db, async (txn) => {
+    const claimedId = doc(collection(db, 'demo_config')).id;
     const snap = await txn.get(settingsRef);
     const data = snap.exists() ? snap.data() : null;
     const decision = demoResetDecision(data, todayStr, stalledId);
@@ -163,13 +195,13 @@ async function claimReset(settingsRef, todayStr, stalledId) {
         lastResetDate: todayStr,
         dailyVisitors: 0,
         resetInProgress: true,
-        resetId: doc(collection(db, 'demo_config')).id,
+        resetId: claimedId,
         resetStartedAt: serverTimestamp(),
       };
       if (data) txn.update(settingsRef, claim);
       else txn.set(settingsRef, { ...claim, visitorCount: 0 });
     }
-    return { decision, runningId: data?.resetId ?? '' };
+    return { decision, runningId: data?.resetId ?? '', claimedId: decision === 'reset' ? claimedId : null };
   });
 }
 
@@ -177,32 +209,37 @@ export async function ensureDemoFresh() {
   const todayStr = getWIBDateString();
   const settingsRef = doc(db, ...SETTINGS_PATH);
 
-  let { decision, runningId } = await claimReset(settingsRef, todayStr);
+  let { decision, runningId, claimedId } = await claimReset(settingsRef, todayStr);
   // Another visit is refilling the demo: keep the loading screen up until it
   // is done rather than show a demo being emptied and refilled.
   const watched = runningId;
   const waitUntil = Date.now() + RESET_WAIT_MS;
   while (decision === 'wait' && Date.now() < waitUntil) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    ({ decision } = await claimReset(settingsRef, todayStr));
+    ({ decision, claimedId } = await claimReset(settingsRef, todayStr));
   }
   // Still running after a whole wait on this visitor's own clock: that refill
   // died partway. Take over exactly that one; a newer claim is left alone.
-  if (decision === 'wait') ({ decision } = await claimReset(settingsRef, todayStr, watched));
+  if (decision === 'wait') ({ decision, claimedId } = await claimReset(settingsRef, todayStr, watched));
   if (decision !== 'reset') return;
 
   try {
     // Emptied even on a first seed: records left behind a deleted settings
-    // document would otherwise be seeded twice.
-    for (const c of COLLECTIONS) await clearCollection(c);
-    await seed();
+    // document would otherwise be seeded twice. A refill taken over meanwhile
+    // stops before it touches the next collection; it only ever deletes
+    // records it listed itself, never the newer refill's.
+    for (const c of COLLECTIONS) {
+      if (!(await stillMine(settingsRef, claimedId))) return;
+      await clearCollection(c);
+    }
+    await seed(settingsRef, claimedId);
   } catch (e) {
+    if (e instanceof TakenOver) return;
     // Give the day back so the next visit tries again, instead of leaving a
     // half-built demo marked as today's.
-    await updateDoc(settingsRef, { lastResetDate: '2020-01-01', resetInProgress: false }).catch(() => {});
+    await releaseClaim(settingsRef, claimedId).catch(() => {});
     throw e;
   }
-  await updateDoc(settingsRef, { resetInProgress: false });
 }
 
 // Dev helper: clear lastResetDate so the next /demo visit reseeds.

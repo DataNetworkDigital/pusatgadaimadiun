@@ -2281,7 +2281,7 @@ The B4 review found one path left to a double seed: a refill still alive but slo
 
 - [ ] **Step 1: Implement**
 
-1. Add `getDoc` to the `firebase/firestore` import.
+1. Add `getDoc` to the `firebase/firestore` import and remove `updateDoc` (no longer used).
 2. Rename the existing `async function seed() {` to `function writeSeed(writer) {`. Inside it, delete `const batch = writeBatch(db);` and the final `await batch.commit();`, and replace every `batch.set(` with `writer.set(`. It now only writes, through whatever `writer` it is given.
 3. After `writeSeed`, add:
 
