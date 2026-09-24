@@ -25,6 +25,7 @@ export default function ReceiptManageSheet({
   onEdit,
   onMove,
   onCancel,
+  onReopenLegacy,
 }) {
   const receipt = (project?.receipts || []).find((r) => r.id === receiptId);
   if (!open || !project || !receipt) return null;
@@ -40,6 +41,7 @@ export default function ReceiptManageSheet({
       onEdit={onEdit}
       onMove={onMove}
       onCancel={onCancel}
+      onReopenLegacy={onReopenLegacy}
     />
   );
 }
@@ -66,9 +68,10 @@ const TITLES = {
   edit: 'Edit uang masuk',
   move: 'Pindah ke bulan lain',
   cancel: 'Batalkan pembayaran?',
+  reopen: 'Tagih lagi kekurangan lama?',
 };
 
-function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCancel }) {
+function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCancel, onReopenLegacy }) {
   const { transactions, loading } = useData();
   const [step, setStep] = useState('menu');
   const [amount, setAmount] = useState(() => Number(receipt.amount) || 0);
@@ -89,6 +92,20 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
   // The version of the project the owner is looking at; a correction is
   // refused if the project has been written since.
   const seenWriteId = project.lastWriteId ?? null;
+  // An old shortfall on the tagihan this payment confirmed: the owner can ask
+  // for it again if it was truly short (his list from the migration report).
+  const firstNo = receipt.allocations?.[0]?.no;
+  const firstRow = (project.payments || []).find((r) => r.no === firstNo);
+  const legacyGap =
+    String(receipt.id).startsWith('legacy-') &&
+    !receipt.moved &&
+    !receipt.reopened &&
+    firstRow?.closure?.kind === 'waive' &&
+    firstRow.closure.reason === 'legacy' &&
+    !project.settledEarly &&
+    project.status !== 'default'
+      ? Number(firstRow.closure.amount) || 0
+      : 0;
   const targets = useMemo(() => moveTargets(project, receipt.id), [project, receipt.id]);
   const nameOf = (id) => accounts?.find((a) => a.id === id)?.name || null;
   const accountName = nameOf(receipt.accountId) || '—';
@@ -201,6 +218,11 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
                 Batalkan pembayaran ini
               </button>
             )}
+            {legacyGap > 0 && (
+              <button type="button" className="btn-secondary w-full" onClick={() => go('reopen')}>
+                Tagih lagi kekurangan lama {formatCurrency(legacyGap)}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -305,6 +327,28 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
         disabled={submitting || !!movePreview.error}
       >
         {submitting ? 'Memindahkan…' : 'Pindahkan'}
+      </button>
+    );
+  } else if (step === 'reopen') {
+    body = (
+      <div className="space-y-3">
+        {back}
+        <p className="text-ink-soft text-[14px] leading-relaxed">
+          Pembayaran bulan {firstNo} dicatat {formatCurrency(receipt.amount)} sebelum ada fitur cicilan, dan
+          kekurangan {formatCurrency(legacyGap)} dianggap lunas. Kalau memang masih kurang, kekurangan itu ditagih lagi
+          di bulan {firstNo}.
+        </p>
+        {errorLine}
+      </div>
+    );
+    footer = (
+      <button
+        type="button"
+        className="btn-primary w-full"
+        disabled={submitting}
+        onClick={() => run(() => onReopenLegacy(firstNo, { seenWriteId }))}
+      >
+        {submitting ? 'Menyimpan…' : 'Ya, tagih lagi'}
       </button>
     );
   } else {

@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useData } from '../../contexts/DataContext';
+import { useToast } from '../../contexts/ToastContext';
 import { useDemo } from '../../contexts/DemoContext';
 import Card from '../common/Card';
 import SectionTitle from '../common/SectionTitle';
 import Pill from '../common/Pill';
 import ConfirmDialog from '../common/ConfirmDialog';
 import ReceiptManageSheet from './ReceiptManageSheet';
+import RemainderSheet from './RemainderSheet';
 import ReceiptSheet from './ReceiptSheet';
 import CloseProjectSheet from './CloseProjectSheet';
 import SettleProjectSheet from './SettleProjectSheet';
@@ -14,7 +16,7 @@ import ProjectForm from './ProjectForm';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { projectSummary } from '../../utils/projectSchedule';
-import { isSettled, isShort, rowReceived, rowRemaining, rowState } from '../../utils/paymentStatus';
+import { isSettled, isShort, rowCarriedIn, rowDue, rowReceived, rowRemaining, rowState } from '../../utils/paymentStatus';
 import {
   IcChevronLeft,
   IcCalendar,
@@ -44,7 +46,18 @@ function StatRow({ label, value, valueClass = 'text-ink', isLast }) {
   );
 }
 
-function PaymentRow({ project, payment, onReceive, onManage, canReceive, editable, accountName, isLast }) {
+function PaymentRow({
+  project,
+  payment,
+  onReceive,
+  onManage,
+  onRemainder,
+  onReopen,
+  canReceive,
+  editable,
+  accountName,
+  isLast,
+}) {
   const due = toDate(payment.dueDate);
   const recv = toDate(payment.receivedDate);
   const isPaid = isSettled(project, payment);
@@ -54,12 +67,43 @@ function PaymentRow({ project, payment, onReceive, onManage, canReceive, editabl
   const dueSoon = !isPaid && days >= 0 && days <= 7;
   const state = rowState(project, payment);
   const short = rowRemaining(project, payment);
+  const received = rowReceived(project, payment);
+  // A remainder closed without money, as the owner reads it. An old
+  // shortfall (reason 'legacy') still reads as plain Lunas and is reopened
+  // from its payment instead.
+  const closure = payment.closure;
+  const closedBy =
+    closure?.kind === 'carry' ? 'carry' : closure?.kind === 'waive' && closure.reason !== 'legacy' ? 'waive' : null;
+  const reopenable =
+    editable && (closure?.kind === 'carry' || (closure?.kind === 'waive' && closure.reason === 'manual'));
+  // Earlier months carried onto this one ("+ tunggakan bulan k").
+  const carriedIn = (project.payments || [])
+    .filter((r) => r.closure?.kind === 'carry' && r.closure.toNo === payment.no)
+    .map((r) => ({ no: r.no, amount: Number(r.closure.amount) || 0 }));
+  const totalDue = rowDue(payment) + rowCarriedIn(project, payment);
   const arrivals = (project.receipts || [])
     .map((r) => ({ r, part: (r.allocations || []).find((a) => a.no === payment.no) }))
     .filter((x) => x.part);
-  // A settled tagihan paid in one arrival already shows it on its own line and
-  // opens it from Edit. Otherwise every arrival is listed and opens on tap.
-  const showArrivals = arrivals.length > 1 || (arrivals.length === 1 && !isPaid);
+  // What is left on a bagi hasil that is due or already partly paid can be
+  // carried or forgiven. The pelunasan gets its own options in Part C.
+  const canSettleRest = canReceive && !isPaid && !isFinal && (received > 0 || days <= 0);
+  // A settled tagihan paid in one arrival shows it on its own line and opens
+  // it from Edit. Otherwise, and on a closed row, every arrival is listed.
+  const showArrivals = arrivals.length > 1 || (arrivals.length === 1 && (!isPaid || !!closedBy));
+
+  let subtitle;
+  if (closedBy === 'carry') {
+    subtitle = `Sisa ${formatCurrency(closure.amount, false)} dipindah ke bulan ${closure.toNo}`;
+  } else if (closedBy === 'waive') {
+    subtitle =
+      received > 0
+        ? `Diterima ${recv ? formatDate(recv, { short: true }) : '—'} · sisa ${formatCurrency(closure.amount, false)} tidak ditagih`
+        : `${formatCurrency(closure.amount, false)} tidak ditagih lagi`;
+  } else if (isPaid) {
+    subtitle = `Diterima ${recv ? formatDate(recv, { short: true }) : '—'}`;
+  } else {
+    subtitle = `Jatuh tempo ${due ? formatDate(due, { short: true }) : '—'}`;
+  }
 
   // The row's own border-b lives on this outer wrapper, not on the flex row
   // below, so it falls after the arrivals list instead of cutting between a
@@ -69,10 +113,14 @@ function PaymentRow({ project, payment, onReceive, onManage, canReceive, editabl
       <div className="flex items-center gap-3 py-3">
         <div
           className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
-            isPaid ? 'bg-daun text-cream' : isFinal ? 'bg-indigo text-cream' : 'bg-cream-deep text-ink-soft'
+            isPaid && !closedBy
+              ? 'bg-daun text-cream'
+              : isFinal
+                ? 'bg-indigo text-cream'
+                : 'bg-cream-deep text-ink-soft'
           }`}
         >
-          {isPaid ? (
+          {isPaid && !closedBy ? (
             <IcCheck size={18} sw={2.4} />
           ) : (
             <span className="text-[13px] font-display font-semibold">{payment.no}</span>
@@ -92,36 +140,57 @@ function PaymentRow({ project, payment, onReceive, onManage, canReceive, editabl
               ) : (
                 <Pill tone="neutral">Sisa {formatCurrency(short, false)}</Pill>
               ))}
+            {closedBy === 'carry' && <Pill tone="neutral">Digabung ke bulan {closure.toNo}</Pill>}
+            {closedBy === 'waive' && <Pill tone="neutral">Dianggap lunas</Pill>}
           </div>
-          <div className="text-[12px] text-ink-mute mt-0.5">
-            {isPaid
-              ? `Diterima ${recv ? formatDate(recv, { short: true }) : '—'}`
-              : `Jatuh tempo ${due ? formatDate(due, { short: true }) : '—'}`}
-          </div>
+          <div className="text-[12px] text-ink-mute mt-0.5">{subtitle}</div>
+          {carriedIn.map((c) => (
+            <div key={c.no} className="text-[12px] text-emas mt-0.5">
+              + tunggakan bulan {c.no} {formatCurrency(c.amount, false)}
+            </div>
+          ))}
         </div>
         <div className="text-right">
           <div
             className={`font-num text-[15px] font-semibold ${
-              isPaid ? 'text-daun' : 'text-ink'
+              isPaid && !closedBy ? 'text-daun' : 'text-ink'
             }`}
             style={{ fontVariantNumeric: 'tabular-nums' }}
           >
-            {formatCurrency(isPaid ? rowReceived(project, payment) : payment.expectedAmount, false)}
+            {formatCurrency(isPaid ? received : totalDue, false)}
           </div>
           {!isPaid && canReceive && (
             <button
               type="button"
               onClick={() => onReceive(payment)}
-              className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70"
+              className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70 block ml-auto"
             >
               Konfirmasi →
             </button>
           )}
-          {isPaid && editable && arrivals.length === 1 && (
+          {canSettleRest && (
+            <button
+              type="button"
+              onClick={() => onRemainder(payment.no)}
+              className="mt-1 text-[12px] font-semibold text-ink-soft active:opacity-70 block ml-auto"
+            >
+              Atur sisa →
+            </button>
+          )}
+          {isPaid && reopenable && (
+            <button
+              type="button"
+              onClick={() => onReopen(payment.no)}
+              className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70 block ml-auto"
+            >
+              Buka lagi →
+            </button>
+          )}
+          {isPaid && editable && !closedBy && arrivals.length === 1 && (
             <button
               type="button"
               onClick={() => onManage(arrivals[0].r.id)}
-              className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70"
+              className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70 block ml-auto"
             >
               Edit →
             </button>
@@ -165,13 +234,26 @@ function PaymentRow({ project, payment, onReceive, onManage, canReceive, editabl
   );
 }
 
+// What reopening bulan `no` does, in the owner's words.
+function reopenMessage(project, no) {
+  const c = (project?.payments || []).find((r) => r.no === no)?.closure;
+  if (!c) return '';
+  if (c.kind === 'carry') {
+    return `Sisa ${formatCurrency(c.amount)} kembali ditagih di bulan ${no}, dan tunggakan di bulan ${c.toNo} dihapus.`;
+  }
+  return `Sisa ${formatCurrency(c.amount)} kembali ditagih di bulan ${no}.`;
+}
+
 export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDemo } = useDemo();
-  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeProjectAsDefault, settleProjectEarly, deleteProject, updateProject } =
+  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, closeProjectAsDefault, settleProjectEarly, deleteProject, updateProject } =
     useData();
   const [managing, setManaging] = useState(null); // a receipt id, or null when closed
+  const [remainderNo, setRemainderNo] = useState(null); // a tagihan number, or null when closed
+  const [reopenNo, setReopenNo] = useState(null); // a tagihan number, or null when closed
+  const { showToast } = useToast();
   const [receiving, setReceiving] = useState(null); // the tagihan number, or null when closed
   const [closing, setClosing] = useState(false);
   const [settling, setSettling] = useState(false);
@@ -375,6 +457,8 @@ export default function ProjectDetail() {
             payment={p}
             onReceive={(pay) => setReceiving(pay.no)}
             onManage={(receiptId) => setManaging(receiptId)}
+            onRemainder={(no) => setRemainderNo(no)}
+            onReopen={(no) => setReopenNo(no)}
             canReceive={isActive}
             editable={isActive || isCompleted}
             accountName={accountName}
@@ -439,6 +523,30 @@ export default function ProjectDetail() {
         onEdit={(data) => updateReceipt(project.id, managing, data)}
         onMove={(startNo, opts) => moveReceipt(project.id, managing, startNo, opts)}
         onCancel={(opts) => cancelReceipt(project.id, managing, opts)}
+        onReopenLegacy={(no, opts) => reopenRemainder(project.id, no, opts)}
+      />
+      <RemainderSheet
+        open={remainderNo !== null}
+        onClose={() => setRemainderNo(null)}
+        project={project}
+        no={remainderNo}
+        onCarry={(opts) => closeRemainder(project.id, remainderNo, { kind: 'carry', ...opts })}
+        onWaive={(opts) => closeRemainder(project.id, remainderNo, { kind: 'waive', ...opts })}
+      />
+      <ConfirmDialog
+        open={reopenNo !== null}
+        onClose={() => setReopenNo(null)}
+        onConfirm={async () => {
+          try {
+            await reopenRemainder(project.id, reopenNo, { seenWriteId: project.lastWriteId ?? null });
+          } catch (e) {
+            showToast(e.message || 'Gagal membuka lagi');
+          }
+        }}
+        title={`Buka lagi sisa bulan ${reopenNo}?`}
+        message={reopenMessage(project, reopenNo)}
+        confirmLabel="Buka lagi"
+        confirmVariant="primary"
       />
       <ReceiptSheet
         open={receiving !== null}
