@@ -104,11 +104,13 @@ export function applySettlement(project, { amount, at, accountId, transactionId 
   const keptRows = (p.payments || []).filter((row) => keptOnSettlement(p, row));
   const keptNos = new Set(keptRows.map((row) => row.no));
   const kept = keptRows.map((row) => {
-    // A tunggakan carried onto a tagihan the pelunasan drops is paid by the
-    // pelunasan too (the suggestion charges it), so the pelunasan closes it.
+    // A tunggakan carried onto a tagihan the pelunasan drops is closed by the
+    // pelunasan, like the tagihan itself: the suggestion charges it when it
+    // sits on this month or on the pelunasan, and drops it with a later month
+    // otherwise (the owner's rule never charges a later untouched month).
     // Left as a carry it would point at a row that is gone, and the
-    // pelunasan, numbered after the kept rows, could take that number and
-    // ask for the tunggakan again.
+    // pelunasan, numbered after the kept rows, could take that number and ask
+    // for the tunggakan again.
     if (row.closure?.kind === 'carry' && !keptNos.has(row.closure.toNo)) {
       return { ...row, closure: { kind: 'waive', amount: row.closure.amount, reason: 'settlement', at } };
     }
