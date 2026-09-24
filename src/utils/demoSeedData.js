@@ -138,7 +138,9 @@ export function buildDemoSeed() {
       dueDate: ts(due),
       type: isFinal ? 'final' : 'interest',
       expectedAmount: expected,
-      receivedAmount: received ? expected : null,
+      // Month 2 was confirmed 50 rb short before partial payments existed:
+      // the demo shows an old shortfall the owner can ask for again.
+      receivedAmount: received ? (i === 2 ? expected - 50000 : expected) : null,
       receivedDate: received ? ts(new Date(due.getTime() - 86400000 * 2)) : null,
       transactionId: null,
       accountKey: received ? 'BCA' : null,

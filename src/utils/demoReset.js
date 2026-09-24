@@ -3,6 +3,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { buildDemoSeed } from './demoSeedData';
+import { demoProjectLedger } from './demoLedger';
 
 const COLLECTIONS = [
   'demo_accounts',
@@ -97,7 +98,17 @@ async function seed() {
 
   for (const p of projects || []) {
     const ref = doc(collection(db, 'demo_projects'));
-    const payments = (p.payments || []).map((pay) => ({
+    // The funding and payment transactions a real project has, so the demo's
+    // payments can be corrected like real ones.
+    const ledger = demoProjectLedger(p, {
+      projectId: ref.id,
+      newId: () => doc(collection(db, 'demo_transactions')).id,
+      accountIdOf: (key) => (key ? accountKeyToId[key] : null),
+    });
+    for (const { id, ...tx } of ledger.transactions) {
+      batch.set(doc(db, 'demo_transactions', id), { ...tx, createdAt: serverTimestamp() });
+    }
+    const payments = ledger.payments.map((pay) => ({
       no: pay.no,
       dueDate: pay.dueDate,
       type: pay.type,
@@ -129,7 +140,7 @@ async function seed() {
       proofFileName: null,
       status: p.status,
       payments,
-      fundingTransactionId: null,
+      fundingTransactionId: ledger.fundingTransactionId,
       createdAt: p.createdAt || serverTimestamp(),
     };
     if (p.closedAt) data.closedAt = p.closedAt;
