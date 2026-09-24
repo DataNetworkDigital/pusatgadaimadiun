@@ -8,7 +8,7 @@ import { useAuth } from './AuthContext';
 import { useDemo } from './DemoContext';
 import { useToast } from './ToastContext';
 import { normalizeProject } from '../utils/normalizeProject';
-import { hasAnyReceipt, isSettled, projectReceivedTotal } from '../utils/paymentStatus';
+import { hasAnyReceipt, isSettled, projectReceivedTotal, rowState } from '../utils/paymentStatus';
 import { generateProjectSchedule, recomputeUnpaidSchedule } from '../utils/projectSchedule';
 import { notifyTelegram, syncToDanaTrack } from '../utils/telegram';
 import { allocateReceipt, openRows } from '../utils/allocation';
@@ -16,6 +16,8 @@ import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
 import { applySettlement } from '../utils/settlement';
 import { applyReceiptCancel, applyReceiptEdit, applyReceiptMove } from '../utils/receiptOps';
 import { applyCloseRemainder, applyReopenRemainder } from '../utils/remainderOps';
+import { applyExtension, applyUndoExtension, currentFinal } from '../utils/extension';
+import { applyRolloverClose, applyRolloverUndo, rolloverSchedule } from '../utils/rollover';
 import { toDate } from '../utils/formatDate';
 import { isProjectMoney } from '../utils/projectMoney';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -430,25 +432,29 @@ export function DataProvider({ children }) {
     await batch.commit();
     toast('Project berhasil dibuat');
 
-    const acct = accounts.find((a) => a.id === data.sourceAccountId);
-    const rateLabel = returnPctTier2 !== returnPctTier1
-      ? `${returnPctTier1}% (bln 1-3) / ${returnPctTier2}% (bln 4+)`
-      : `${returnPctTier1}%/bln`;
-    notifyTelegram(
-      `🆕 <b>Project Baru</b>\n` +
-      `Nama: ${data.name}\n` +
-      `Pemilik: ${data.ownerName || '-'}\n` +
-      `No HP: ${data.phone || '-'}\n` +
-      `NIK: ${data.nik || '-'}\n` +
-      `Alamat: ${data.address || '-'}\n` +
-      `Agunan: ${data.collateral || '-'}\n` +
-      `Nilai: Rp ${Number(principalAmount).toLocaleString('id-ID')}\n` +
-      `Modal keluar: Rp ${Number(disbursedAmount).toLocaleString('id-ID')}\n` +
-      `Return: ${rateLabel} × ${durationMonths} bln\n` +
-      `Rekening: ${acct?.name || '-'}`
-    );
+    // The demo is for trying the app: it never reaches the owner's Telegram
+    // chat or his DanaTrack data.
+    if (!isDemo) {
+      const acct = accounts.find((a) => a.id === data.sourceAccountId);
+      const rateLabel = returnPctTier2 !== returnPctTier1
+        ? `${returnPctTier1}% (bln 1-3) / ${returnPctTier2}% (bln 4+)`
+        : `${returnPctTier1}%/bln`;
+      notifyTelegram(
+        `🆕 <b>Project Baru</b>\n` +
+        `Nama: ${data.name}\n` +
+        `Pemilik: ${data.ownerName || '-'}\n` +
+        `No HP: ${data.phone || '-'}\n` +
+        `NIK: ${data.nik || '-'}\n` +
+        `Alamat: ${data.address || '-'}\n` +
+        `Agunan: ${data.collateral || '-'}\n` +
+        `Nilai: Rp ${Number(principalAmount).toLocaleString('id-ID')}\n` +
+        `Modal keluar: Rp ${Number(disbursedAmount).toLocaleString('id-ID')}\n` +
+        `Return: ${rateLabel} × ${durationMonths} bln\n` +
+        `Rekening: ${acct?.name || '-'}`
+      );
 
-    syncToDanaTrack({ name: data.name, principalAmount, disbursedAmount, monthlyReturnPct, durationMonths, startDate });
+      syncToDanaTrack({ name: data.name, principalAmount, disbursedAmount, monthlyReturnPct, durationMonths, startDate });
+    }
 
     return projectRef.id;
   }
@@ -457,6 +463,17 @@ export function DataProvider({ children }) {
     const project = projects.find((p) => p.id === id);
     if (!project) throw new Error('Project tidak ditemukan');
     const hasReceived = hasAnyReceipt(project);
+    // A new contract's modal is the remainder it carried over (spec 7.3): no
+    // account paid it out, so it cannot change or be given an account.
+    if (project.fundingMode === 'rollover') {
+      const modalChange =
+        data.disbursedAmount !== undefined && Number(data.disbursedAmount) !== project.disbursedAmount;
+      const accountChange =
+        data.sourceAccountId !== undefined && (data.sourceAccountId || null) !== (project.sourceAccountId || null);
+      if (modalChange || accountChange) {
+        throw new Error('Modal kontrak lanjutan dialihkan dari project lama dan tidak bisa diubah.');
+      }
+    }
 
     const update = {};
     // Text/metadata fields — always editable
@@ -529,25 +546,50 @@ export function DataProvider({ children }) {
       if (newPrincipal <= 0) throw new Error('Nilai project harus lebih dari 0');
       if (newDay < 1 || newDay > 31) throw new Error('Tanggal pembayaran harus 1-31');
 
-      update.payments = recomputeUnpaidSchedule(project.payments || [], {
-        principalAmount: newPrincipal,
-        returnPctTier1: newTier1,
-        returnPctTier2: newTier2,
-        durationMonths: newDuration,
-        startDate: newStart,
-        paymentDayOfMonth: newDay,
-      });
-      if (data.principalAmount !== undefined) update.principalAmount = newPrincipal;
-      if (data.returnPctTier1 !== undefined || data.monthlyReturnPct !== undefined) {
-        update.returnPctTier1 = newTier1;
-        update.monthlyReturnPct = newTier1;
-      }
-      if (data.returnPctTier2 !== undefined) update.returnPctTier2 = newTier2;
-      if (data.durationMonths !== undefined) update.durationMonths = newDuration;
-      if (data.paymentDayOfMonth !== undefined) update.paymentDayOfMonth = newDay;
-      if (data.startDate !== undefined) {
-        update.startDate = Timestamp.fromDate(newStart);
-        newFundingDate = update.startDate;
+      // An extension's months, or a new contract's contract-day bagi hasil,
+      // would be lost if the schedule were rebuilt from the duration: those
+      // schedules only change through their own actions. The form still
+      // sends every field, so only a real change is refused.
+      const locked =
+        (project.extensions || []).length > 0 || (project.payments || []).some((r) => r.leadCharge);
+      if (locked) {
+        const curStart = project.startDate?.toDate?.() || null;
+        const curDay = Number(project.paymentDayOfMonth) || curStart?.getDate();
+        const unchanged =
+          newPrincipal === Number(project.principalAmount) &&
+          newTier1 === Number(curTier1) &&
+          newTier2 === Number(curTier2) &&
+          newDuration === Number(project.durationMonths) &&
+          newDay === curDay &&
+          sameDay(newStart, curStart);
+        if (!unchanged) {
+          throw new Error(
+            (project.extensions || []).length
+              ? 'Jadwal sudah diubah lewat Mundur/Perpanjang.'
+              : 'Jadwal kontrak lanjutan ini tidak bisa diubah lewat Edit Project.'
+          );
+        }
+      } else {
+        update.payments = recomputeUnpaidSchedule(project.payments || [], {
+          principalAmount: newPrincipal,
+          returnPctTier1: newTier1,
+          returnPctTier2: newTier2,
+          durationMonths: newDuration,
+          startDate: newStart,
+          paymentDayOfMonth: newDay,
+        });
+        if (data.principalAmount !== undefined) update.principalAmount = newPrincipal;
+        if (data.returnPctTier1 !== undefined || data.monthlyReturnPct !== undefined) {
+          update.returnPctTier1 = newTier1;
+          update.monthlyReturnPct = newTier1;
+        }
+        if (data.returnPctTier2 !== undefined) update.returnPctTier2 = newTier2;
+        if (data.durationMonths !== undefined) update.durationMonths = newDuration;
+        if (data.paymentDayOfMonth !== undefined) update.paymentDayOfMonth = newDay;
+        if (data.startDate !== undefined) {
+          update.startDate = Timestamp.fromDate(newStart);
+          newFundingDate = update.startDate;
+        }
       }
     }
 
@@ -819,11 +861,17 @@ export function DataProvider({ children }) {
         update.closedAt = Timestamp.fromDate(recvDate);
       }
       t.update(ref, update);
-      return { count: allocations.length, completed: update.status === 'completed' };
+      // A pelunasan this payment left partly paid: the screen asks what
+      // happens to the rest (spec 7.2).
+      const final = currentFinal(after);
+      const finalShort =
+        !update.status && !!final && byNo.has(final.no) && rowState(after, final) === 'kurang';
+      return { count: allocations.length, completed: update.status === 'completed', finalShort };
     }, { alreadyDone: (p) => (p.receipts || []).some((r) => r.id === txRef.id), seenWriteId });
     const count = outcome?.count ?? 1;
     const base = count > 1 ? `Pembayaran tercatat untuk ${count} tagihan` : 'Pembayaran tercatat';
     toast(outcome?.completed ? `${base}, project selesai` : base);
+    return { receiptId: txRef.id, finalShort: !!outcome?.finalShort };
   }
 
   // ===== Corrections to one arrival of money =====
@@ -1015,6 +1063,126 @@ export function DataProvider({ children }) {
     toast(status === 'active' ? `Sisa bulan ${no} dibuka lagi, project aktif lagi` : `Sisa bulan ${no} dibuka lagi`);
   }
 
+  // ===== When the pelunasan falls due (spec 7) =====
+  // No money moves: only the schedule, through the same transaction, write id
+  // and screen-version check as every other project write.
+
+  async function extendProject(projectId, { kind, months, ratePct, startMode, note = '', seenWriteId } = {}) {
+    // Made before the transaction so a rerun can recognise its own extension.
+    const extId = doc(collection(db, C('projects'))).id;
+    const extension = await inProjectTransaction(projectId, (t, project, ref, writeId) => {
+      const out = applyExtension(project, {
+        kind, months, ratePct, startMode, note, at: Timestamp.now(), id: extId,
+      });
+      t.update(ref, { ...out.update, lastWriteId: writeId });
+      return out.extension;
+    }, {
+      alreadyDone: (p) => (p.extensions || []).some((e) => e.id === extId),
+      seenWriteId,
+    });
+    const n = extension?.months ?? months;
+    toast(kind === 'mundur' ? `Pelunasan dimundurkan ${n} bulan` : `Sisa pelunasan diperpanjang ${n} bulan`);
+  }
+
+  async function undoExtension(projectId, { extensionId, seenWriteId } = {}) {
+    if (!extensionId) throw new Error('Perpanjangan yang dibatalkan tidak diketahui.');
+    await inProjectTransaction(projectId, (t, project, ref, writeId) => {
+      const { update } = applyUndoExtension(project, extensionId);
+      t.update(ref, { ...update, lastWriteId: writeId });
+    }, {
+      // Gone already: this call's own earlier attempt, or another device.
+      alreadyDone: (p) => !(p.extensions || []).some((e) => e.id === extensionId),
+      seenWriteId,
+    });
+    toast('Perpanjangan dibatalkan');
+  }
+
+  // Kontrak baru (spec 7.3): the remainder of a partly paid pelunasan becomes
+  // a new project in the same write that closes the old pelunasan. No money
+  // moves: the new project's modal is that remainder, carried over.
+  async function rolloverProject(oldProjectId, data, { seenWriteId } = {}) {
+    const name = (data.name || '').trim();
+    const principalAmount = Number(data.principalAmount) || 0;
+    const returnPctTier1 = Number(data.returnPctTier1) || 0;
+    const returnPctTier2 = data.returnPctTier2 != null ? Number(data.returnPctTier2) : returnPctTier1;
+    const durationMonths = Number(data.durationMonths) || 0;
+    const startDate = toDate(data.startDate) || new Date();
+    const paymentDayOfMonth = Number(data.paymentDayOfMonth) || startDate.getDate();
+    if (!name) throw new Error('Nama project wajib diisi');
+    if (principalAmount <= 0) throw new Error('Nilai project harus lebih dari 0');
+    if (durationMonths <= 0) throw new Error('Durasi project minimal 1 bulan');
+    if (paymentDayOfMonth < 1 || paymentDayOfMonth > 31) throw new Error('Tanggal pembayaran harus 1-31');
+
+    const payments = rolloverSchedule({
+      principalAmount, returnPctTier1, returnPctTier2, durationMonths, startDate, paymentDayOfMonth,
+      firstMonthCharge: data.firstMonthCharge,
+    });
+    // Made before the transaction so a rerun can recognise its own contract.
+    const newRef = doc(collection(db, C('projects')));
+    const at = Timestamp.fromDate(startDate);
+    const outcome = await inProjectTransaction(oldProjectId, (t, old, ref, writeId) => {
+      const { update, amount } = applyRolloverClose(old, { newProjectId: newRef.id, at });
+      t.set(newRef, {
+        name,
+        ownerName: data.ownerName || null,
+        contractNumber: data.contractNumber || null,
+        phone: data.phone || null,
+        nik: data.nik || null,
+        address: data.address || null,
+        collateral: data.collateral || null,
+        description: data.description || '',
+        principalAmount,
+        // The remainder as read now, not the number the form showed.
+        disbursedAmount: amount,
+        monthlyReturnPct: returnPctTier1,
+        returnPctTier1,
+        returnPctTier2,
+        durationMonths,
+        startDate: at,
+        paymentDayOfMonth,
+        sourceAccountId: null,
+        proofUrl: data.proofUrl || null,
+        proofFileName: data.proofFileName || null,
+        status: 'active',
+        payments,
+        fundingMode: 'rollover',
+        rolledFromProjectId: oldProjectId,
+        fundingTransactionId: null,
+        lastWriteId: writeId,
+        createdAt: serverTimestamp(),
+      });
+      t.update(ref, { ...update, lastWriteId: writeId });
+      return { amount, oldName: old.name };
+    }, {
+      alreadyDone: (p) => p.rolledOverToProjectId === newRef.id,
+      seenWriteId,
+    });
+    toast('Kontrak lanjutan dibuat');
+
+    // Telegram only: a new contract moves no money, so DanaTrack is not told
+    // (spec 7.3). Never from the demo.
+    if (!isDemo) {
+      const rateLabel = returnPctTier2 !== returnPctTier1
+        ? `${returnPctTier1}% (bln 1-3) / ${returnPctTier2}% (bln 4+)`
+        : `${returnPctTier1}%/bln`;
+      const lead = payments.find((r) => r.leadCharge);
+      notifyTelegram(
+        `🔁 <b>Kontrak lanjutan dari ${outcome?.oldName || '-'}</b>\n` +
+        `Nama: ${name}\n` +
+        `Pemilik: ${data.ownerName || '-'}\n` +
+        `No HP: ${data.phone || '-'}\n` +
+        `NIK: ${data.nik || '-'}\n` +
+        `Alamat: ${data.address || '-'}\n` +
+        `Agunan: ${data.collateral || '-'}\n` +
+        `Nilai: Rp ${principalAmount.toLocaleString('id-ID')}\n` +
+        `Modal dialihkan: Rp ${Number(outcome?.amount || 0).toLocaleString('id-ID')} (tanpa uang keluar)\n` +
+        `Return: ${rateLabel} × ${durationMonths} bln` +
+        (lead ? `\nBagi hasil di hari kontrak: Rp ${lead.expectedAmount.toLocaleString('id-ID')}` : '')
+      );
+    }
+    return newRef.id;
+  }
+
   async function closeProjectAsDefault(projectId, { recoveredAmount = 0, accountId, date } = {}) {
     const recv = Number(recoveredAmount) || 0;
     if (recv > 0 && !accountId) throw new Error('Pilih rekening tujuan untuk pengembalian');
@@ -1117,9 +1285,13 @@ export function DataProvider({ children }) {
   // - Delete the project and all its related transactions
   async function deleteProject(id) {
     if (!projects.some((p) => p.id === id)) return;
-    const clawedBack = await inProjectTransaction(
+    const outcome = await inProjectTransaction(
       id,
       async (t, project, ref) => {
+        // Carried into a new contract: that contract's modal is this money.
+        if (project.rolledOverToProjectId) {
+          throw new Error('Project ini sudah dilanjutkan ke kontrak baru. Batalkan dulu kontrak lanjutannya.');
+        }
         // Reads first (a transaction allows no read after a write). What each
         // transaction says is what actually moved the balances, so that is
         // what gets reversed: before this stage the Transaksi page could
@@ -1137,6 +1309,17 @@ export function DataProvider({ children }) {
           if (tx) arrivals.push(tx);
         }
         const recovery = await read('transactions', project.finalRecoveryTransactionId);
+
+        // A new contract gives its remainder back to the project it came from.
+        let restore = null;
+        if (project.fundingMode === 'rollover' && project.rolledFromProjectId) {
+          const oldRef = doc(db, C('projects'), project.rolledFromProjectId);
+          const oldSnap = await t.get(oldRef);
+          if (oldSnap.exists()) {
+            const { update } = applyRolloverUndo({ id: oldSnap.id, ...oldSnap.data() }, project.id);
+            if (update) restore = { ref: oldRef, update, name: oldSnap.data().name };
+          }
+        }
 
         // One balance change per account, however many transactions touched it.
         const deltas = new Map();
@@ -1171,11 +1354,18 @@ export function DataProvider({ children }) {
           t.update(accRef, { balance: increment(amount), updatedAt: serverTimestamp() });
         }
         t.delete(ref);
-        return projectReceivedTotal(project);
+        if (restore) {
+          t.update(restore.ref, { ...restore.update, lastWriteId: doc(collection(db, C('projects'))).id });
+        }
+        return { received: projectReceivedTotal(project), restoredTo: restore?.name ?? null };
       },
       { missingOk: true }
     );
-    toast(clawedBack > 0 ? 'Project dibatalkan, modal & return dikembalikan' : 'Project dibatalkan, modal dikembalikan');
+    if (outcome?.restoredTo) {
+      toast(`Kontrak lanjutan dibatalkan, sisa kembali ditagih di ${outcome.restoredTo}`);
+    } else {
+      toast((outcome?.received ?? 0) > 0 ? 'Project dibatalkan, modal & return dikembalikan' : 'Project dibatalkan, modal dikembalikan');
+    }
   }
 
   // ===== Reset =====
@@ -1201,7 +1391,7 @@ export function DataProvider({ children }) {
     addTransaction, updateTransaction, deleteTransaction,
     addDebt, updateDebt, deleteDebt, payInstallment,
     addReminder, updateReminder, deleteReminder,
-    addProject, updateProject, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, closeProjectAsDefault, settleProjectEarly, deleteProject,
+    addProject, updateProject, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, deleteProject,
     resetAllData,
   };
 
