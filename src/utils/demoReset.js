@@ -1,5 +1,5 @@
 import {
-  collection, doc, getDoc, getDocs, runTransaction, writeBatch, serverTimestamp,
+  collection, doc, getDocs, runTransaction, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { buildDemoSeed } from './demoSeedData';
@@ -24,16 +24,17 @@ export function getWIBDateString(date = new Date()) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-async function clearCollection(name) {
+// Deletes every record of one collection, a chunk per transaction that
+// first checks this visit still holds today's refill: a refill taken over
+// meanwhile stops before it deletes anything the newer one wrote.
+async function clearCollection(name, settingsRef, resetId) {
   const snap = await getDocs(collection(db, name));
-  const chunks = [];
   for (let i = 0; i < snap.docs.length; i += 400) {
-    chunks.push(snap.docs.slice(i, i + 400));
-  }
-  for (const chunk of chunks) {
-    const batch = writeBatch(db);
-    chunk.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
+    const chunk = snap.docs.slice(i, i + 400);
+    await runTransaction(db, async (txn) => {
+      await claimHeld(txn, settingsRef, resetId);
+      chunk.forEach((d) => txn.delete(d.ref));
+    });
   }
 }
 
@@ -154,10 +155,12 @@ function writeSeed(writer) {
 // landing next to the newer one.
 class TakenOver extends Error {}
 
-// Whether this visit's claim on today's refill is still the current one.
-async function stillMine(settingsRef, resetId) {
-  const snap = await getDoc(settingsRef);
-  return snap.exists() && snap.data().resetId === resetId;
+// Inside a transaction: this visit still holds today's refill, or the refill
+// stops. Returns the settings as read.
+async function claimHeld(txn, settingsRef, resetId) {
+  const snap = await txn.get(settingsRef);
+  if (!snap.exists() || snap.data().resetId !== resetId) throw new TakenOver();
+  return snap.data();
 }
 
 // The seed and the "done" flag land together, and only while this visit's
@@ -165,8 +168,10 @@ async function stillMine(settingsRef, resetId) {
 // alone fills the demo.
 async function seed(settingsRef, resetId) {
   await runTransaction(db, async (txn) => {
-    const snap = await txn.get(settingsRef);
-    if (!snap.exists() || snap.data().resetId !== resetId) throw new TakenOver();
+    const settings = await claimHeld(txn, settingsRef, resetId);
+    // Already done: this refill's own commit landed and only its answer was
+    // lost, so the SDK runs this again. Seeding again would double the demo.
+    if (!settings.resetInProgress) return;
     writeSeed(txn);
     txn.update(settingsRef, { resetInProgress: false });
   });
@@ -225,13 +230,9 @@ export async function ensureDemoFresh() {
 
   try {
     // Emptied even on a first seed: records left behind a deleted settings
-    // document would otherwise be seeded twice. A refill taken over meanwhile
-    // stops before it touches the next collection; it only ever deletes
-    // records it listed itself, never the newer refill's.
-    for (const c of COLLECTIONS) {
-      if (!(await stillMine(settingsRef, claimedId))) return;
-      await clearCollection(c);
-    }
+    // document would otherwise be seeded twice. Every step checks the claim,
+    // so a refill taken over meanwhile stops where it is.
+    for (const c of COLLECTIONS) await clearCollection(c, settingsRef, claimedId);
     await seed(settingsRef, claimedId);
   } catch (e) {
     if (e instanceof TakenOver) return;
