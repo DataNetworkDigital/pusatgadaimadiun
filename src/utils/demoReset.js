@@ -1,9 +1,10 @@
 import {
-  collection, doc, getDocs, runTransaction, writeBatch, serverTimestamp,
+  collection, doc, getDocs, runTransaction, updateDoc, writeBatch, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { buildDemoSeed } from './demoSeedData';
 import { demoProjectLedger } from './demoLedger';
+import { demoResetDecision, RESET_STALE_MS } from './demoResetDecision';
 
 const COLLECTIONS = [
   'demo_accounts',
@@ -150,46 +151,57 @@ async function seed() {
   await batch.commit();
 }
 
+// Today's claim on the reset, or what to do instead (see demoResetDecision).
+async function claimReset(settingsRef, todayStr) {
+  return runTransaction(db, async (txn) => {
+    const snap = await txn.get(settingsRef);
+    const data = snap.exists() ? snap.data() : null;
+    const decision = demoResetDecision(
+      data && { ...data, resetStartedAtMs: data.resetStartedAt?.toMillis?.() ?? null },
+      todayStr,
+      Date.now()
+    );
+    if (decision === 'reset') {
+      const claim = {
+        lastResetDate: todayStr,
+        dailyVisitors: 0,
+        resetInProgress: true,
+        resetStartedAt: serverTimestamp(),
+      };
+      if (data) txn.update(settingsRef, claim);
+      else txn.set(settingsRef, { ...claim, visitorCount: 0 });
+    }
+    return decision;
+  });
+}
+
 export async function ensureDemoFresh() {
   const todayStr = getWIBDateString();
   const settingsRef = doc(db, ...SETTINGS_PATH);
 
-  const decision = await runTransaction(db, async (txn) => {
-    const snap = await txn.get(settingsRef);
-    if (!snap.exists()) {
-      txn.set(settingsRef, {
-        lastResetDate: todayStr,
-        visitorCount: 0,
-        dailyVisitors: 0,
-        resetInProgress: true,
-        resetStartedAt: serverTimestamp(),
-      });
-      return 'seed';
-    }
-    const data = snap.data();
-    if (data.lastResetDate !== todayStr) {
-      txn.update(settingsRef, {
-        resetInProgress: true,
-        resetStartedAt: serverTimestamp(),
-      });
-      return 'reset';
-    }
-    return 'ready';
-  });
-
-  if (decision === 'reset' || decision === 'seed') {
-    if (decision === 'reset') {
-      for (const c of COLLECTIONS) await clearCollection(c);
-    }
-    await seed();
-    await runTransaction(db, async (txn) => {
-      txn.update(settingsRef, {
-        lastResetDate: todayStr,
-        dailyVisitors: 0,
-        resetInProgress: false,
-      });
-    });
+  let decision = await claimReset(settingsRef, todayStr);
+  // Another visit is refilling the demo: keep the loading screen up until it
+  // is done rather than show a demo being emptied and refilled. If that
+  // refill died, the decision turns to 'reset' and this visit redoes it.
+  const waitUntil = Date.now() + RESET_STALE_MS;
+  while (decision === 'wait' && Date.now() < waitUntil) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    decision = await claimReset(settingsRef, todayStr);
   }
+  if (decision !== 'reset') return;
+
+  try {
+    // Emptied even on a first seed: records left behind a deleted settings
+    // document would otherwise be seeded twice.
+    for (const c of COLLECTIONS) await clearCollection(c);
+    await seed();
+  } catch (e) {
+    // Give the day back so the next visit tries again, instead of leaving a
+    // half-built demo marked as today's.
+    await updateDoc(settingsRef, { lastResetDate: '2020-01-01', resetInProgress: false }).catch(() => {});
+    throw e;
+  }
+  await updateDoc(settingsRef, { resetInProgress: false });
 }
 
 // Dev helper: clear lastResetDate so the next /demo visit reseeds.
