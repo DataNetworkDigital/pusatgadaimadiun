@@ -1112,48 +1112,58 @@ export function DataProvider({ children }) {
     // Made before the transaction so a rerun can recognise its own contract.
     const newRef = doc(collection(db, C('projects')));
     const at = Timestamp.fromDate(startDate);
-    const outcome = await inProjectTransaction(oldProjectId, (t, old, ref, writeId) => {
-      const { update, amount } = applyRolloverClose(old, { newProjectId: newRef.id, at });
-      // The form was filled from the remainder it showed; if more arrived
-      // since, its numbers are stale.
-      if (data.disbursedAmount != null && Math.round(Number(data.disbursedAmount)) !== amount) {
-        throw new Error('Data project ini baru saja berubah. Periksa lagi, lalu simpan.');
-      }
-      t.set(newRef, {
-        name,
-        ownerName: data.ownerName || null,
-        contractNumber: data.contractNumber || null,
-        phone: data.phone || null,
-        nik: data.nik || null,
-        address: data.address || null,
-        collateral: data.collateral || null,
-        description: data.description || '',
-        principalAmount,
-        // The remainder as read now, not the number the form showed.
-        disbursedAmount: amount,
-        monthlyReturnPct: returnPctTier1,
-        returnPctTier1,
-        returnPctTier2,
-        durationMonths,
-        startDate: at,
-        paymentDayOfMonth,
-        sourceAccountId: null,
-        proofUrl: data.proofUrl || null,
-        proofFileName: data.proofFileName || null,
-        status: 'active',
-        payments,
-        fundingMode: 'rollover',
-        rolledFromProjectId: oldProjectId,
-        fundingTransactionId: null,
-        lastWriteId: writeId,
-        createdAt: serverTimestamp(),
+    let outcome;
+    try {
+      outcome = await inProjectTransaction(oldProjectId, (t, old, ref, writeId) => {
+        const { update, amount } = applyRolloverClose(old, { newProjectId: newRef.id, at });
+        // The form was filled from the remainder it showed; if more arrived
+        // since, its numbers are stale.
+        if (data.disbursedAmount != null && Math.round(Number(data.disbursedAmount)) !== amount) {
+          throw new Error('Data project ini baru saja berubah. Periksa lagi, lalu simpan.');
+        }
+        t.set(newRef, {
+          name,
+          ownerName: data.ownerName || null,
+          contractNumber: data.contractNumber || null,
+          phone: data.phone || null,
+          nik: data.nik || null,
+          address: data.address || null,
+          collateral: data.collateral || null,
+          description: data.description || '',
+          principalAmount,
+          // The remainder as read now, not the number the form showed.
+          disbursedAmount: amount,
+          monthlyReturnPct: returnPctTier1,
+          returnPctTier1,
+          returnPctTier2,
+          durationMonths,
+          startDate: at,
+          paymentDayOfMonth,
+          sourceAccountId: null,
+          proofUrl: data.proofUrl || null,
+          proofFileName: data.proofFileName || null,
+          status: 'active',
+          payments,
+          fundingMode: 'rollover',
+          rolledFromProjectId: oldProjectId,
+          fundingTransactionId: null,
+          lastWriteId: writeId,
+          createdAt: serverTimestamp(),
+        });
+        t.update(ref, { ...update, lastWriteId: writeId });
+        return { amount, oldName: old.name };
+      }, {
+        alreadyDone: (p) => p.rolledOverToProjectId === newRef.id,
+        seenWriteId,
       });
-      t.update(ref, { ...update, lastWriteId: writeId });
-      return { amount, oldName: old.name };
-    }, {
-      alreadyDone: (p) => p.rolledOverToProjectId === newRef.id,
-      seenWriteId,
-    });
+    } catch (e) {
+      // The Kontrak baru form fills itself once, when it opens: after the old
+      // project changed it has to be opened again to show the new numbers.
+      if (/baru saja berubah/.test(e?.message || '')) {
+        throw new Error('Data project ini baru saja berubah. Tutup form ini, lalu buka Kontrak baru lagi.', { cause: e });
+      }
+      throw e;
+    }
     toast('Kontrak lanjutan dibuat');
 
     // Telegram only: a new contract moves no money, so DanaTrack is not told
