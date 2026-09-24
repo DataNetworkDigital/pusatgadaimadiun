@@ -812,7 +812,7 @@ export function DataProvider({ children }) {
         (tx.toAccount || null) !== (receipt.accountId || null)
       ) {
         throw new Error(
-          'Transaksi pembayaran ini sudah diubah atau dihapus di halaman Transaksi, jadi tidak cocok lagi. Batalkan pembayaran ini, lalu catat ulang.'
+          'Transaksi untuk pembayaran ini tidak ada atau sudah diubah di halaman Transaksi, jadi tidak cocok lagi. Batalkan pembayaran ini, lalu catat ulang.'
         );
       }
 

@@ -59,7 +59,7 @@ function Allocations({ allocations }) {
 }
 
 const TX_CHANGED =
-  'Transaksi pembayaran ini sudah diubah atau dihapus di halaman Transaksi, jadi jumlahnya tidak bisa diedit. Batalkan pembayaran ini, lalu catat ulang.';
+  'Transaksi untuk pembayaran ini tidak ada atau sudah diubah di halaman Transaksi, jadi jumlahnya tidak bisa diedit. Batalkan pembayaran ini, lalu catat ulang.';
 
 const TITLES = {
   menu: 'Uang masuk',
