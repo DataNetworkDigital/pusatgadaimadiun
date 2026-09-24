@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveRowFields, correctionRules, receiptBlock, applyReceiptCancel } from './receiptOps';
+import { deriveRowFields, correctionRules, receiptBlock, applyReceiptCancel, applyReceiptEdit } from './receiptOps';
 import { isSettled, rowRemaining, rowState, projectReceivedTotal } from './paymentStatus';
 import { normalizeProject } from './normalizeProject';
 
@@ -143,5 +143,131 @@ describe('applyReceiptCancel', () => {
 
   it('is refused for an arrival that does not exist', () => {
     expect(() => applyReceiptCancel(stored([]), 'nope')).toThrow(/tidak ditemukan/);
+  });
+});
+
+const at = new Date(2026, 8, 20);
+const edit = (p, id, amount, accountId = 'bca') => applyReceiptEdit(p, id, { amount, at, accountId });
+
+describe('applyReceiptEdit: payments confirmed before this feature', () => {
+  it('stays settled when corrected down, the gap kept as an old shortfall', () => {
+    const p = legacy({ 1: 5_500_000 });
+    const out = edit(p, 'legacy-1', 5_000_000);
+    expect(row(out, 1).closure).toEqual({ kind: 'waive', amount: 500_000, reason: 'legacy' });
+    expect(isSettled(after(p, out), row(out, 1))).toBe(true);
+    expect(out.update.receipts.find((r) => r.id === 'legacy-1')).toMatchObject({
+      amount: 5_000_000,
+      date: at,
+      allocations: [{ no: 1, amount: 5_000_000 }],
+    });
+    expect(out.update.status).toBeUndefined();
+  });
+
+  it('drops the old shortfall once corrected up to the full tagihan', () => {
+    const p = legacy({ 2: 5_000_000 });
+    expect(p.payments[1].closure).toEqual({ kind: 'waive', amount: 500_000, reason: 'legacy' });
+    const out = edit(p, 'legacy-2', 5_500_000);
+    expect(row(out, 2)).not.toHaveProperty('closure');
+    expect(isSettled(after(p, out), row(out, 2))).toBe(true);
+  });
+
+  it('re-measures the old shortfall when corrected further down', () => {
+    const p = legacy({ 2: 5_000_000 });
+    const out = edit(p, 'legacy-2', 4_000_000);
+    expect(row(out, 2).closure).toEqual({ kind: 'waive', amount: 1_500_000, reason: 'legacy' });
+  });
+});
+
+describe('applyReceiptEdit: payments under the new rules', () => {
+  it('lets a gap show as Kurang instead of hiding it', () => {
+    const p = stored([arrival('a', { 1: 5_500_000 }), arrival('b', { 2: 5_500_000 })]);
+    const out = edit(p, 'b', 5_000_000);
+    expect(row(out, 2)).not.toHaveProperty('closure');
+    expect(rowRemaining(after(p, out), row(out, 2))).toBe(500_000);
+    expect(out.update.status).toBeUndefined();
+  });
+
+  it('re-splits an arrival that paid two tagihan, starting from the first one', () => {
+    const p = stored([arrival('a', { 1: 5_500_000 }), arrival('b', { 2: 5_500_000, 3: 1_500_000 })]);
+    expect(edit(p, 'b', 6_000_000).allocations).toEqual([
+      { no: 2, amount: 5_500_000 },
+      { no: 3, amount: 500_000 },
+    ]);
+    expect(edit(p, 'b', 12_000_000).allocations).toEqual([
+      { no: 2, amount: 5_500_000 },
+      { no: 3, amount: 5_500_000 },
+      { no: 4, amount: 1_000_000 },
+    ]);
+  });
+
+  it('edits one of several arrivals on the same tagihan and leaves the others alone', () => {
+    const p = stored([arrival('a', { 2: 3_000_000 }), arrival('b', { 2: 2_500_000 })]);
+    const out = edit(p, 'b', 2_000_000, 'bri');
+    expect(out.update.receipts[0]).toEqual(p.receipts[0]);
+    expect(out.update.receipts[1]).toMatchObject({ id: 'b', amount: 2_000_000, accountId: 'bri', date: at });
+    expect(rowRemaining(after(p, out), row(out, 2))).toBe(500_000);
+    expect(row(out, 2)).toMatchObject({ receivedAmount: 5_000_000 });
+  });
+
+  it('refuses an amount above what is still owed', () => {
+    const p = stored(
+      [arrival('a', { 1: 5_500_000, 2: 5_500_000, 3: 5_500_000 }), arrival('b', { 4: 100_000_000 })],
+      { status: 'completed' }
+    );
+    expect(() => edit(p, 'b', 100_500_000)).toThrow('Jumlah melebihi sisa tagihan sebesar Rp 500.000');
+  });
+
+  it('puts a project completed by its payments back to active when a correction leaves a tagihan short', () => {
+    const p = stored(
+      [arrival('a', { 1: 5_500_000, 2: 5_500_000, 3: 5_500_000 }), arrival('b', { 4: 100_000_000 })],
+      { status: 'completed', closedAt: due(9) }
+    );
+    const out = edit(p, 'b', 99_500_000);
+    expect(out.update.status).toBe('active');
+    expect(out.update.closedAt).toBeNull();
+  });
+
+  it('completes an active project when a correction pays its last tagihan in full', () => {
+    const p = stored([arrival('a', { 1: 5_500_000, 2: 5_500_000, 3: 5_500_000 }), arrival('b', { 4: 99_500_000 })]);
+    const out = edit(p, 'b', 100_000_000);
+    expect(out.update.status).toBe('completed');
+    expect(out.update.closedAt).toBe(at);
+  });
+});
+
+describe('applyReceiptEdit: project closed by pelunasan dipercepat', () => {
+  // Bulan 1 and 2 paid, then settled early for 100jt on a new pelunasan row 3.
+  const settled = (paid2 = 5_500_000, closure2 = null) => ({
+    status: 'completed',
+    settledEarly: true,
+    closedAt: due(8),
+    payments: [
+      { no: 1, type: 'interest', expectedAmount: 5_500_000, dueDate: due(6) },
+      { no: 2, type: 'interest', expectedAmount: 5_500_000, dueDate: due(7), ...(closure2 ? { closure: closure2 } : {}) },
+      { no: 3, type: 'final', expectedAmount: 100_000_000, dueDate: due(8), settledEarly: true },
+    ],
+    receipts: [arrival('a', { 1: 5_500_000 }), arrival('b', { 2: paid2 }), arrival('s', { 3: 100_000_000 })],
+  });
+
+  it('lets the pelunasan tagihan follow the corrected amount', () => {
+    const p = settled();
+    const out = edit(p, 's', 99_000_000);
+    expect(row(out, 3).expectedAmount).toBe(99_000_000);
+    expect(isSettled(after(p, out), row(out, 3))).toBe(true);
+    expect(out.update.status).toBeUndefined();
+  });
+
+  it('keeps an earlier tagihan closed by the pelunasan when corrected down', () => {
+    const p = settled();
+    const out = edit(p, 'b', 5_000_000);
+    expect(row(out, 2).closure).toEqual({ kind: 'waive', amount: 500_000, reason: 'settlement', at: due(8) });
+    expect(isSettled(after(p, out), row(out, 2))).toBe(true);
+    expect(out.update.status).toBeUndefined();
+  });
+
+  it('drops the pelunasan waiver once the tagihan is corrected up to full', () => {
+    const p = settled(3_000_000, { kind: 'waive', amount: 2_500_000, reason: 'settlement', at: due(8) });
+    const out = edit(p, 'b', 5_500_000);
+    expect(row(out, 2)).not.toHaveProperty('closure');
   });
 });

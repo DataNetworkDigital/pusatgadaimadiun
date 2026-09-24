@@ -1,4 +1,6 @@
-import { isSettled } from './paymentStatus';
+import { allocateReceipt } from './allocation';
+import { isSettled, rowRemaining } from './paymentStatus';
+import { formatCurrency } from './formatCurrency';
 import { normalizeProject } from './normalizeProject';
 import { toDate } from './formatDate';
 
@@ -161,4 +163,54 @@ export function applyReceiptCancel(project, receiptId) {
   guardCorrection(p, receipt, 'cancel');
   const base = withoutReceipt(p, receipt);
   return { update: finish(p, base.payments, base.receipts, null) };
+}
+
+/**
+ * Edit one arrival: its amount, account, or date. It is re-allocated from the
+ * first tagihan it paid; changing the month is Move.
+ * `at` is the arrival's date in the shape stored (a Timestamp in the app).
+ * @returns {{ update, allocations }}
+ */
+export function applyReceiptEdit(project, receiptId, { amount, at, accountId }) {
+  const p = normalizeProject(project);
+  const receipt = findReceipt(p, receiptId);
+  guardCorrection(p, receipt, 'edit');
+  const amt = Math.round(Number(amount) || 0);
+  if (amt <= 0) throw new Error('Jumlah harus lebih dari 0');
+
+  const firstNo = receipt.allocations[0].no;
+  let base = withoutReceipt(p, receipt);
+  // On a project closed by pelunasan dipercepat, the pelunasan row's tagihan
+  // is simply what was paid, so it follows the corrected amount.
+  if (p.settledEarly) {
+    base = {
+      ...base,
+      payments: base.payments.map((r) =>
+        r.settledEarly && r.no === firstNo ? { ...r, expectedAmount: amt } : r
+      ),
+    };
+  }
+
+  const { allocations, leftover } = allocateReceipt(base, amt, firstNo);
+  if (!allocations.length || leftover > 0) {
+    throw new Error(`Jumlah melebihi sisa tagihan sebesar ${formatCurrency(leftover)}`);
+  }
+
+  const edited = { ...receipt, amount: amt, date: at, accountId, allocations };
+  const receipts = (p.receipts || []).map((r) => (r.id === receipt.id ? edited : r));
+  const measured = { ...base, receipts };
+
+  const payments = base.payments.map((row) => {
+    const gap = rowRemaining(measured, row);
+    if (gap <= 0) return row;
+    if (isLegacy(receipt) && row.no === firstNo) {
+      return { ...row, closure: { kind: 'waive', amount: gap, reason: 'legacy' } };
+    }
+    if (p.settledEarly && !row.settledEarly) {
+      return { ...row, closure: { kind: 'waive', amount: gap, reason: 'settlement', at: p.closedAt ?? null } };
+    }
+    return row;
+  });
+
+  return { update: finish(p, payments, receipts, at), allocations };
 }
