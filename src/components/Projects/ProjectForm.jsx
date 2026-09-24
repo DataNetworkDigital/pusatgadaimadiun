@@ -22,12 +22,26 @@ function computeAutoDisbursed(principal, pct) {
   return v > 0 ? v : 0;
 }
 
-export default function ProjectForm({ open, onClose, onSubmit, accounts, initial }) {
+export default function ProjectForm({ open, onClose, onSubmit, accounts, initial, rollover = null }) {
   const isEdit = !!initial;
   const hasReceived = isEdit && hasAnyReceipt(initial);
   // A closed month keeps its own due date and amount through a schedule
   // rebuild, so it pins the capital as money does.
   const capitalLocked = hasReceived || (isEdit && (initial.payments || []).some((r) => r.closure));
+  // Kontrak baru: a new project prefilled from the old one, whose modal is
+  // the remainder carried over (spec 7.3). `rollover` = { from, amount, startDate }.
+  const isRollover = !isEdit && !!rollover;
+  // A new contract being edited keeps its carried-over modal and no account.
+  const rolloverEdit = isEdit && initial.fundingMode === 'rollover';
+  const noAccount = isRollover || rolloverEdit;
+  // Rebuilding the schedule from the duration would drop an extension's
+  // months or a new contract's contract-day bagi hasil (DataContext refuses
+  // it too).
+  const scheduleLocked =
+    isEdit && ((initial.extensions || []).length > 0 || (initial.payments || []).some((r) => r.leadCharge));
+  const scheduleLockMessage = (initial?.extensions || []).length
+    ? 'Jadwal sudah diubah lewat Mundur/Perpanjang. Durasi, return, dan tanggal tidak bisa diubah di sini.'
+    : 'Jadwal kontrak lanjutan ini dimulai dengan bagi hasil di hari kontrak. Durasi, return, dan tanggal tidak bisa diubah di sini.';
 
   const [name, setName] = useState('');
   const [ownerName, setOwnerName] = useState('');
@@ -51,6 +65,12 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
   // Tracks whether the user has manually overridden the auto-computed
   // disbursed amount. Once touched, principal/return changes stop overwriting it.
   const [disbursedTouched, setDisbursedTouched] = useState(false);
+  // Kontrak baru: charge the first month's bagi hasil on the contract day
+  // (default on). Its amount follows nilai project × return bulan 1 until
+  // the owner types one.
+  const [leadOn, setLeadOn] = useState(true);
+  const [leadAmount, setLeadAmount] = useState(0);
+  const [leadTouched, setLeadTouched] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -77,6 +97,32 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
         setSourceAccountId(initial.sourceAccountId || accounts?.[0]?.id || '');
         setProofUrl(initial.proofUrl || '');
         setDisbursedTouched(true); // keep the saved disbursed value as-is
+      } else if (rollover) {
+        const src = rollover.from;
+        const start = rollover.startDate || new Date();
+        const t1 = src.returnPctTier1 != null ? src.returnPctTier1 : src.monthlyReturnPct;
+        const t2 = src.returnPctTier2 != null ? src.returnPctTier2 : t1;
+        setName(`${src.name} (lanjutan)`);
+        setOwnerName(src.ownerName || '');
+        setContractNumber('');
+        setPhone(src.phone || '');
+        setNik(src.nik || '');
+        setAddress(src.address || '');
+        setCollateral(src.collateral || '');
+        setDescription('');
+        setPrincipalAmount(rollover.amount);
+        setDisbursedAmount(rollover.amount);
+        setReturnPctTier1(t1 != null ? String(t1) : '');
+        setReturnPctTier2(t2 != null ? String(t2) : '');
+        setDurationMonths(src.durationMonths || 6);
+        setStartDate(formatDateInput(start));
+        setPaymentDayOfMonth(src.paymentDayOfMonth || start.getDate());
+        setSourceAccountId('');
+        setProofUrl('');
+        setDisbursedTouched(true); // the modal is the remainder, never recomputed
+        setLeadOn(true);
+        setLeadAmount(0);
+        setLeadTouched(false);
       } else {
         setName('');
         setOwnerName('');
@@ -120,6 +166,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
   const interestMonths = Math.max(0, durNum - 1);
   const totalReturn = totalTieredInterest(principalAmount || 0, durNum, tier1Pct, tier2Pct);
   const upfrontDiscount = (Number(principalAmount) || 0) - (Number(disbursedAmount) || 0);
+  const leadValue = leadTouched ? leadAmount : calcMonthlyInterest(principalAmount || 0, tier1Pct);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -140,8 +187,12 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
       setError('Durasi minimal 1 bulan');
       return;
     }
-    if (!sourceAccountId) {
+    if (!noAccount && !sourceAccountId) {
       setError('Pilih rekening sumber');
+      return;
+    }
+    if (isRollover && leadOn && !(Number(leadValue) > 0)) {
+      setError('Bagi hasil hari kontrak harus lebih dari 0');
       return;
     }
     const day = parseInt(paymentDayOfMonth, 10);
@@ -161,15 +212,16 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
         collateral: collateral.trim() || null,
         description,
         principalAmount,
-        disbursedAmount,
+        disbursedAmount: rolloverEdit ? undefined : disbursedAmount,
         returnPctTier1: tier1Pct,
         returnPctTier2: tier2Pct,
         durationMonths: Number(durationMonths),
         startDate: fromDateInput(startDate),
         paymentDayOfMonth: day,
-        sourceAccountId,
+        sourceAccountId: noAccount ? undefined : sourceAccountId,
         proofUrl: proofUrl.trim() || null,
         proofFileName: null,
+        ...(isRollover ? { firstMonthCharge: leadOn ? Number(leadValue) : 0 } : {}),
       });
       onClose();
     } catch (e) {
@@ -183,8 +235,14 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
     <Modal
       open={open}
       onClose={onClose}
-      title={isEdit ? 'Edit Project' : 'Tambah Project'}
-      subtitle={isEdit ? 'Update detail project (jadwal pembayaran disesuaikan otomatis)' : 'Catat investasi project bisnis dengan jadwal pembayaran terstruktur'}
+      title={isRollover ? 'Kontrak baru' : isEdit ? 'Edit Project' : 'Tambah Project'}
+      subtitle={
+        isRollover
+          ? `Lanjutan dari ${rollover.from.name}. Tidak ada uang keluar.`
+          : isEdit
+            ? 'Update detail project (jadwal pembayaran disesuaikan otomatis)'
+            : 'Catat investasi project bisnis dengan jadwal pembayaran terstruktur'
+      }
       footer={
         <button
           type="submit"
@@ -192,14 +250,19 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
           className="btn-primary w-full"
           disabled={submitting}
         >
-          {submitting ? 'Menyimpan…' : (isEdit ? 'Simpan Perubahan' : 'Simpan Project')}
+          {submitting ? 'Menyimpan…' : isRollover ? 'Buat kontrak baru' : isEdit ? 'Simpan Perubahan' : 'Simpan Project'}
         </button>
       }
     >
       <form id="project-form" onSubmit={handleSubmit} className="space-y-4">
-        {capitalLocked && (
+        {capitalLocked && !scheduleLocked && (
           <div className="bg-emas-soft border border-emas/30 rounded-xl p-3 text-[12px] text-ink-soft leading-snug">
             ⚠️ Sudah ada pembayaran masuk atau tagihan yang ditutup. Modal, rekening sumber, dan tanggal mulai tidak bisa diubah. Durasi, return %, dan tanggal pembayaran masih bisa disesuaikan (jadwal pembayaran yang belum diterima akan dihitung ulang).
+          </div>
+        )}
+        {scheduleLocked && (
+          <div className="bg-emas-soft border border-emas/30 rounded-xl p-3 text-[12px] text-ink-soft leading-snug">
+            {scheduleLockMessage}
           </div>
         )}
         <div>
@@ -291,21 +354,23 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
               setPrincipalAmount(v);
               if (!disbursedTouched) setDisbursedAmount(computeAutoDisbursed(v, effectiveReturnPct));
             }}
-            disabled={capitalLocked}
+            disabled={capitalLocked || scheduleLocked}
           />
         </div>
 
         <div>
-          <label className="label-text">Modal Keluar dari Rekening</label>
+          <label className="label-text">
+            {noAccount ? 'Modal dialihkan (tidak ada uang keluar)' : 'Modal Keluar dari Rekening'}
+          </label>
           <CurrencyInput
             value={disbursedAmount}
             onChange={(v) => {
               setDisbursedAmount(v);
               setDisbursedTouched(true);
             }}
-            disabled={capitalLocked}
+            disabled={capitalLocked || noAccount}
           />
-          {!capitalLocked && (
+          {!capitalLocked && !noAccount && (
             <p className="text-[11px] text-ink-mute mt-1">
               Terisi otomatis: Nilai project − return {tier1Pct}% (bulan 1). Bisa diubah manual.
             </p>
@@ -343,6 +408,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
                 }
               }}
               placeholder={`${DEFAULT_TIER1_PCT}`}
+              disabled={scheduleLocked}
             />
           </div>
           <div>
@@ -354,6 +420,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
               className="input-field"
               value={durationMonths}
               onChange={(e) => setDurationMonths(e.target.value)}
+              disabled={scheduleLocked}
             />
           </div>
         </div>
@@ -369,6 +436,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
               value={returnPctTier2}
               onChange={(e) => setReturnPctTier2(e.target.value)}
               placeholder={`${DEFAULT_TIER2_PCT}`}
+              disabled={scheduleLocked}
             />
             <p className="text-[11px] text-ink-mute mt-1">
               Bulan 1-3 pakai {tier1Pct}%, bulan ke-4 dan seterusnya pakai {tier2Pct}%.
@@ -411,12 +479,35 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
           </div>
         </div>
 
+        {isRollover && (
+          <div className="rounded-xl border border-line bg-paper p-3 space-y-2">
+            <label className="flex items-center gap-2 text-[14px] text-ink">
+              <input type="checkbox" checked={leadOn} onChange={(e) => setLeadOn(e.target.checked)} />
+              Tagih bagi hasil bulan pertama di hari kontrak
+            </label>
+            {leadOn && (
+              <div>
+                <CurrencyInput
+                  value={leadValue}
+                  onChange={(v) => {
+                    setLeadAmount(v);
+                    setLeadTouched(true);
+                  }}
+                />
+                <p className="text-[11px] text-ink-mute mt-1">
+                  Jatuh tempo di tanggal mulai. Bawaannya {tier1Pct}% dari nilai project; bulan berikutnya tetap seperti biasa.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label-text">Tanggal Mulai</label>
             <DateField
               value={startDate}
-              disabled={capitalLocked}
+              disabled={capitalLocked || scheduleLocked}
               onChange={(v) => {
                 setStartDate(v);
                 // Payment day auto-follows the start date's day-of-month
@@ -435,27 +526,30 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
               className="input-field"
               value={paymentDayOfMonth}
               onChange={(e) => setPaymentDayOfMonth(e.target.value)}
+              disabled={scheduleLocked}
             />
           </div>
         </div>
 
-        <div>
-          <label className="label-text">Rekening Sumber Pendanaan</label>
-          <select
-            className="input-field"
-            value={sourceAccountId}
-            onChange={(e) => setSourceAccountId(e.target.value)}
-            required
-            disabled={capitalLocked}
-          >
-            <option value="">Pilih rekening</option>
-            {accounts?.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name} ({formatCurrency(a.balance)})
-              </option>
-            ))}
-          </select>
-        </div>
+        {!noAccount && (
+          <div>
+            <label className="label-text">Rekening Sumber Pendanaan</label>
+            <select
+              className="input-field"
+              value={sourceAccountId}
+              onChange={(e) => setSourceAccountId(e.target.value)}
+              required
+              disabled={capitalLocked}
+            >
+              <option value="">Pilih rekening</option>
+              {accounts?.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({formatCurrency(a.balance)})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div>
           <label className="label-text">Catatan (opsional)</label>
@@ -482,7 +576,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
           </p>
         </div>
 
-        {accounts?.length === 0 && (
+        {accounts?.length === 0 && !noAccount && (
           <p className="text-[13px] text-terra bg-terra-soft border border-terra/30 rounded-xl p-3">
             Belum ada rekening. Tambahkan rekening dulu sebelum buat project.
           </p>
