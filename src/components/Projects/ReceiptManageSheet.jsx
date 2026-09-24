@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import Modal from '../common/Modal';
+import { useData } from '../../contexts/DataContext';
 import CurrencyInput from '../common/CurrencyInput';
 import DateField from '../common/DateField';
 import { formatDate, formatDateInput, fromDateInput, toDate } from '../../utils/formatDate';
@@ -57,6 +58,9 @@ function Allocations({ allocations }) {
   );
 }
 
+const TX_CHANGED =
+  'Transaksi pembayaran ini sudah diubah atau dihapus di halaman Transaksi, jadi jumlahnya tidak bisa diedit. Batalkan pembayaran ini, lalu catat ulang.';
+
 const TITLES = {
   menu: 'Uang masuk',
   edit: 'Edit uang masuk',
@@ -65,9 +69,13 @@ const TITLES = {
 };
 
 function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCancel }) {
+  const { transactions, loading } = useData();
   const [step, setStep] = useState('menu');
   const [amount, setAmount] = useState(() => Number(receipt.amount) || 0);
-  const [account, setAccount] = useState(() => receipt.accountId || 'cash');
+  // An account deleted since is not offered back: the owner picks a real one.
+  const [account, setAccount] = useState(() =>
+    accounts?.some((a) => a.id === receipt.accountId) ? receipt.accountId : ''
+  );
   const [date, setDate] = useState(() => formatDateInput(toDate(receipt.date) || new Date()));
   const [startNo, setStartNo] = useState(() => {
     const first = moveTargets(project, receipt.id)[0];
@@ -79,7 +87,20 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
   const rules = correctionRules(project);
   const block = receiptBlock(project, receipt);
   const targets = useMemo(() => moveTargets(project, receipt.id), [project, receipt.id]);
-  const accountName = accounts?.find((a) => a.id === receipt.accountId)?.name || '—';
+  const nameOf = (id) => accounts?.find((a) => a.id === id)?.name || null;
+  const accountName = nameOf(receipt.accountId) || '—';
+
+  // What the ledger holds for this arrival. Before this stage the Transaksi
+  // page could change or delete a project transaction: an Edit is then
+  // refused (DataContext says so too), and a cancel reverses what the
+  // transaction holds, not what the receipt says.
+  const tx = (transactions || []).find((t) => t.id === receipt.transactionId) || null;
+  const txChanged =
+    !loading &&
+    (!tx ||
+      (Number(tx.amount) || 0) !== (Number(receipt.amount) || 0) ||
+      (tx.toAccount || null) !== (receipt.accountId || null));
+  const notes = [block, txChanged && TX_CHANGED, rules.why].filter(Boolean);
 
   const editPreview = useMemo(() => {
     try {
@@ -88,6 +109,16 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
       return { error: e.message };
     }
   }, [project, receipt.id, amount, account]);
+
+  // Gaps an edit leaves closed as settled rather than showing Kurang: an old
+  // payment keeps its confirmation, a project closed by pelunasan stays
+  // closed. The owner sees it before saving.
+  const forgiven = (editPreview.update?.payments || []).filter((row) => {
+    const c = row.closure;
+    if (c?.kind !== 'waive' || (c.reason !== 'legacy' && c.reason !== 'settlement')) return false;
+    const before = (project.payments || []).find((p) => p.no === row.no)?.closure;
+    return !before || before.amount !== c.amount;
+  });
 
   const movePreview = useMemo(() => {
     if (!startNo) return { error: 'Tidak ada tagihan lain yang masih terbuka.' };
@@ -144,12 +175,14 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
           </div>
         </div>
         <Allocations allocations={receipt.allocations || []} />
-        {(block || rules.why) && (
-          <p className="text-[12px] text-ink-mute leading-snug">{block || rules.why}</p>
-        )}
+        {notes.map((note) => (
+          <p key={note} className="text-[12px] text-ink-mute leading-snug">
+            {note}
+          </p>
+        ))}
         {!block && (
           <div className="space-y-2 pt-1">
-            {rules.edit && (
+            {rules.edit && !txChanged && (
               <button type="button" className="btn-secondary w-full" onClick={() => go('edit')}>
                 Edit jumlah, rekening, atau tanggal
               </button>
@@ -186,6 +219,7 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
         <div>
           <label className="label-text">Masuk ke</label>
           <select className="input-field" value={account} onChange={(e) => setAccount(e.target.value)}>
+            {account === '' && <option value="">Pilih rekening</option>}
             <option value="cash">Tunai (Kas)</option>
             {accounts?.map((a) => (
               <option key={a.id} value={a.id}>
@@ -203,6 +237,14 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
         ) : (
           <Allocations allocations={editPreview.allocations} />
         )}
+        {forgiven.map((row) => (
+          <p key={row.no} className="text-[12px] text-ink-mute leading-snug">
+            Selisih {formatCurrency(row.closure.amount)} di bulan {row.no} tetap dianggap lunas,{' '}
+            {row.closure.reason === 'legacy'
+              ? 'karena pembayaran ini dicatat sebelum ada fitur cicilan.'
+              : 'karena project ini sudah ditutup lewat pelunasan dipercepat.'}
+          </p>
+        ))}
         {errorLine}
       </form>
     );
@@ -266,9 +308,11 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
       <div className="space-y-3">
         {back}
         <p className="text-ink-soft text-[14px] leading-relaxed">
-          Pembayaran {formatCurrency(receipt.amount)} tanggal {formatDate(receipt.date)} dibatalkan. Saldo{' '}
-          {accountName} berkurang {formatCurrency(receipt.amount)} dan transaksinya ikut dihapus. Tagihan yang
-          ditutup pembayaran ini terbuka lagi.
+          Pembayaran {formatCurrency(receipt.amount)} tanggal {formatDate(receipt.date)} dibatalkan.{' '}
+          {tx && nameOf(tx.toAccount)
+            ? `Saldo ${nameOf(tx.toAccount)} berkurang ${formatCurrency(tx.amount)} dan transaksinya ikut dihapus.`
+            : 'Transaksi atau rekeningnya sudah tidak ada, jadi saldo tidak diubah.'}{' '}
+          Tagihan yang ditutup pembayaran ini terbuka lagi.
         </p>
         {errorLine}
       </div>
