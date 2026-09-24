@@ -646,7 +646,7 @@ export function DataProvider({ children }) {
       });
     } catch (e) {
       if (e?.code === 'unavailable' || /offline/i.test(e?.message || '')) {
-        throw new Error('Koneksi internet terputus. Tidak ada yang tersimpan, coba lagi.');
+        throw new Error('Koneksi internet terputus. Tidak ada yang tersimpan, coba lagi.', { cause: e });
       }
       throw e;
     }
