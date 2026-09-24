@@ -1,0 +1,147 @@
+import { describe, it, expect } from 'vitest';
+import { deriveRowFields, correctionRules, receiptBlock, applyReceiptCancel } from './receiptOps';
+import { isSettled, rowRemaining, rowState, projectReceivedTotal } from './paymentStatus';
+import { normalizeProject } from './normalizeProject';
+
+const due = (month) => new Date(2026, month, 5);
+
+// Three monthly bagi hasil of 5,5jt and the pelunasan (100jt) in month four.
+const schedule = () => [
+  { no: 1, type: 'interest', expectedAmount: 5_500_000, dueDate: due(6), receivedAmount: null },
+  { no: 2, type: 'interest', expectedAmount: 5_500_000, dueDate: due(7), receivedAmount: null },
+  { no: 3, type: 'interest', expectedAmount: 5_500_000, dueDate: due(8), receivedAmount: null },
+  { no: 4, type: 'final', expectedAmount: 100_000_000, dueDate: due(9), receivedAmount: null },
+];
+
+// One arrival of money; `pays` maps tagihan number to the amount it put there.
+const arrival = (id, pays, { date = due(8), accountId = 'bca' } = {}) => {
+  const allocations = Object.entries(pays).map(([no, amount]) => ({ no: Number(no), amount }));
+  return {
+    id,
+    amount: allocations.reduce((s, a) => s + a.amount, 0),
+    date,
+    accountId,
+    transactionId: `tx-${id}`,
+    allocations,
+  };
+};
+
+// A project that stores receipts, as B2 writes it.
+const stored = (receipts, over = {}) => ({ status: 'active', payments: schedule(), receipts, ...over });
+
+// A project stored before receipts existed: money only on the rows. The
+// corrections receive it normalized, exactly as the screens do.
+const legacy = (paid, over = {}) =>
+  normalizeProject({
+    status: 'active',
+    payments: schedule().map((r) =>
+      paid[r.no] != null
+        ? { ...r, receivedAmount: paid[r.no], receivedDate: due(r.no + 5), accountId: 'bca', transactionId: `tx-${r.no}` }
+        : r
+    ),
+    ...over,
+  });
+
+const row = (out, no) => out.update.payments.find((r) => r.no === no);
+const after = (p, out) => ({ ...p, ...out.update });
+
+describe('deriveRowFields', () => {
+  it('sums what every arrival put on a tagihan and takes the latest arrival for the rest', () => {
+    const receipts = [
+      arrival('a', { 2: 3_000_000 }, { date: due(7), accountId: 'bca' }),
+      arrival('b', { 2: 2_500_000, 3: 1_000_000 }, { date: due(8), accountId: 'bri' }),
+    ];
+    const rows = deriveRowFields(schedule(), receipts);
+    expect(rows[1]).toMatchObject({ receivedAmount: 5_500_000, receivedDate: due(8), transactionId: 'tx-b', accountId: 'bri' });
+    expect(rows[2]).toMatchObject({ receivedAmount: 1_000_000, receivedDate: due(8), transactionId: 'tx-b' });
+  });
+
+  it('clears the fields on a tagihan no arrival pays any more', () => {
+    const rows = schedule();
+    rows[0] = { ...rows[0], receivedAmount: 5_500_000, receivedDate: due(6), transactionId: 'tx-old', accountId: 'bca' };
+    expect(deriveRowFields(rows, [])[0]).toMatchObject({
+      receivedAmount: null,
+      receivedDate: null,
+      transactionId: null,
+      accountId: null,
+    });
+  });
+});
+
+describe('correctionRules', () => {
+  it('allows every correction on an active or completed project', () => {
+    expect(correctionRules({ status: 'active' })).toEqual({ edit: true, move: true, cancel: true, why: null });
+    expect(correctionRules({ status: 'completed' })).toEqual({ edit: true, move: true, cancel: true, why: null });
+  });
+
+  it('only allows editing on a project closed by pelunasan dipercepat, and says why', () => {
+    const rules = correctionRules({ status: 'completed', settledEarly: true });
+    expect(rules).toMatchObject({ edit: true, move: false, cancel: false });
+    expect(rules.why).toMatch(/pelunasan dipercepat/);
+  });
+
+  it('allows nothing on a macet project', () => {
+    expect(correctionRules({ status: 'default' })).toMatchObject({ edit: false, move: false, cancel: false });
+  });
+});
+
+describe('receiptBlock', () => {
+  it('does not block an old payment because of its own old-shortfall waiver', () => {
+    const p = legacy({ 2: 5_000_000 });
+    expect(receiptBlock(p, p.receipts.find((r) => r.id === 'legacy-2'))).toBeNull();
+  });
+
+  it('blocks when a tagihan it paid was closed another way', () => {
+    const p = stored([arrival('a', { 2: 3_000_000 })]);
+    p.payments[1] = { ...p.payments[1], closure: { kind: 'carry', amount: 2_500_000, toNo: 3 } };
+    expect(receiptBlock(p, p.receipts[0])).toMatch(/bulan 2 sudah ditutup/);
+  });
+});
+
+describe('applyReceiptCancel', () => {
+  it('removes the arrival and opens the tagihan it paid again', () => {
+    const p = stored([arrival('a', { 1: 5_500_000 }), arrival('b', { 2: 5_500_000 })]);
+    const out = applyReceiptCancel(p, 'b');
+    expect(out.update.receipts.map((r) => r.id)).toEqual(['a']);
+    expect(out.update.receipts[0]).toEqual(p.receipts[0]);
+    expect(rowState(after(p, out), row(out, 2))).toBe('belum');
+    expect(row(out, 2)).toMatchObject({ receivedAmount: null, transactionId: null });
+    expect(projectReceivedTotal(after(p, out))).toBe(5_500_000);
+  });
+
+  it('opens every tagihan a split arrival paid', () => {
+    const p = stored([arrival('a', { 2: 5_500_000, 3: 1_500_000 })]);
+    const out = applyReceiptCancel(p, 'a');
+    expect(rowRemaining(after(p, out), row(out, 2))).toBe(5_500_000);
+    expect(rowRemaining(after(p, out), row(out, 3))).toBe(5_500_000);
+  });
+
+  it("takes an old payment's shortfall waiver with it", () => {
+    const p = legacy({ 1: 5_500_000, 2: 5_000_000 });
+    const out = applyReceiptCancel(p, 'legacy-2');
+    expect(row(out, 2)).not.toHaveProperty('closure');
+    expect(rowRemaining(after(p, out), row(out, 2))).toBe(5_500_000);
+    expect(isSettled(after(p, out), row(out, 1))).toBe(true);
+  });
+
+  it('puts a project completed by its payments back to active', () => {
+    const p = stored(
+      [arrival('a', { 1: 5_500_000, 2: 5_500_000, 3: 5_500_000 }), arrival('b', { 4: 100_000_000 })],
+      { status: 'completed', closedAt: due(9) }
+    );
+    const out = applyReceiptCancel(p, 'b');
+    expect(out.update.status).toBe('active');
+    expect(out.update.closedAt).toBeNull();
+  });
+
+  it('is refused on a project closed by pelunasan dipercepat, and on a macet one', () => {
+    const settled = stored([arrival('a', { 1: 5_500_000 })], { status: 'completed', settledEarly: true });
+    expect(() => applyReceiptCancel(settled, 'a')).toThrow(/pelunasan dipercepat/);
+    const macet = stored([arrival('a', { 1: 5_500_000 })], { status: 'default' });
+    expect(() => applyReceiptCancel(macet, 'a')).toThrow(/macet/);
+  });
+
+  it('is refused for an arrival that does not exist', () => {
+    expect(() => applyReceiptCancel(stored([]), 'nope')).toThrow(/tidak ditemukan/);
+  });
+});
