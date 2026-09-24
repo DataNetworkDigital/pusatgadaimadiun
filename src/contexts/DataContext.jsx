@@ -666,89 +666,81 @@ export function DataProvider({ children }) {
   // One arrival of money: allocated across the tagihan it covers, oldest first,
   // and stored as a receipt that carries its own transaction.
   async function recordReceipt(projectId, { amount, date, account, startNo = null }) {
-    const project = projects.find((p) => p.id === projectId);
-    if (!project) throw new Error('Project tidak ditemukan');
     const amt = Math.round(Number(amount) || 0);
     if (amt <= 0) throw new Error('Jumlah harus lebih dari 0');
     if (!account) throw new Error('Pilih rekening tujuan');
-
-    const { allocations, leftover } = allocateReceipt(project, amt, startNo);
-    if (!allocations.length) {
-      throw new Error('Tidak ada tagihan yang masih terbuka untuk dibayar');
-    }
-    if (leftover > 0) {
-      throw new Error(`Jumlah melebihi sisa tagihan sebesar ${formatCurrency(leftover)}`);
-    }
-
     const recvDate = date instanceof Date ? date : new Date();
-    const batch = writeBatch(db);
 
-    const accountId = creditMoneyIn(batch, account, amt);
+    const count = await inProjectTransaction(projectId, (t, project, ref) => {
+      const { allocations, leftover } = allocateReceipt(project, amt, startNo);
+      if (!allocations.length) {
+        throw new Error('Tidak ada tagihan yang masih terbuka untuk dibayar');
+      }
+      if (leftover > 0) {
+        throw new Error(`Jumlah melebihi sisa tagihan sebesar ${formatCurrency(leftover)}`);
+      }
 
-    const txRef = doc(collection(db, C('transactions')));
-    const months = allocations.map((a) => a.no).join(', ');
-    batch.set(txRef, {
-      type: 'income',
-      amount: amt,
-      description: `Pembayaran project: ${project.name} (bln ${months})`,
-      date: Timestamp.fromDate(recvDate),
-      fromAccount: null,
-      toAccount: accountId,
-      debtId: null,
-      projectId,
-      paymentNo: allocations[0].no,
-      receiptId: txRef.id,
-      createdAt: serverTimestamp(),
-    });
+      const accountId = creditMoneyIn(t, account, amt);
 
-    const receipt = {
-      id: txRef.id,
-      amount: amt,
-      date: Timestamp.fromDate(recvDate),
-      accountId,
-      transactionId: txRef.id,
-      allocations,
-    };
+      const txRef = doc(collection(db, C('transactions')));
+      t.set(txRef, {
+        type: 'income',
+        amount: amt,
+        description: receiptDescription(project, allocations),
+        date: Timestamp.fromDate(recvDate),
+        fromAccount: null,
+        toAccount: accountId,
+        debtId: null,
+        projectId,
+        paymentNo: allocations[0].no,
+        receiptId: txRef.id,
+        createdAt: serverTimestamp(),
+      });
 
-    // MUST spread the existing receipts, never write [receipt] alone.
-    // project.receipts already holds the entries derived from rows confirmed
-    // before this feature existed, because DataContext normalizes on read.
-    // Writing only the new one would store a receipts array that omits them,
-    // and since the reader switches to the receipts branch as soon as that
-    // array exists, every one of those older payments would read as unpaid.
-    const receipts = [...(project.receipts || []), receipt];
-
-    // Keep the per-row fields in step: the received date is still read directly
-    // when a row is rendered and in the collector's Tgl Bayar column.
-    const byNo = new Map(allocations.map((a) => [a.no, a.amount]));
-    const updatedPayments = (project.payments || []).map((row) => {
-      const add = byNo.get(row.no);
-      if (add == null) return row;
-      return {
-        ...row,
-        receivedAmount: (Number(row.receivedAmount) || 0) + add,
-        receivedDate: Timestamp.fromDate(recvDate),
-        transactionId: txRef.id,
+      const receipt = {
+        id: txRef.id,
+        amount: amt,
+        date: Timestamp.fromDate(recvDate),
         accountId,
+        transactionId: txRef.id,
+        allocations,
       };
+
+      // MUST spread the existing receipts, never write [receipt] alone.
+      // project.receipts already holds the entries derived from rows confirmed
+      // before this feature existed, because the project is normalized on read.
+      // Writing only the new one would store a receipts array that omits them,
+      // and since the reader switches to the receipts branch as soon as that
+      // array exists, every one of those older payments would read as unpaid.
+      const receipts = [...(project.receipts || []), receipt];
+
+      // Keep the per-row fields in step: the received date is still read
+      // directly when a row is rendered and in the collector's Tgl Bayar column.
+      const byNo = new Map(allocations.map((a) => [a.no, a.amount]));
+      const updatedPayments = (project.payments || []).map((row) => {
+        const add = byNo.get(row.no);
+        if (add == null) return row;
+        return {
+          ...row,
+          receivedAmount: (Number(row.receivedAmount) || 0) + add,
+          receivedDate: Timestamp.fromDate(recvDate),
+          transactionId: txRef.id,
+          accountId,
+        };
+      });
+
+      const after = { ...project, payments: updatedPayments, receipts };
+      const allSettled =
+        updatedPayments.length > 0 && updatedPayments.every((row) => isSettled(after, row));
+      const update = { payments: updatedPayments, receipts };
+      if (allSettled && project.status === 'active') {
+        update.status = 'completed';
+        update.closedAt = Timestamp.fromDate(recvDate);
+      }
+      t.update(ref, update);
+      return allocations.length;
     });
-
-    const after = { ...project, payments: updatedPayments, receipts };
-    const allSettled =
-      updatedPayments.length > 0 && updatedPayments.every((row) => isSettled(after, row));
-    const update = { payments: updatedPayments, receipts };
-    if (allSettled && project.status === 'active') {
-      update.status = 'completed';
-      update.closedAt = Timestamp.fromDate(recvDate);
-    }
-    batch.update(doc(db, C('projects'), projectId), update);
-
-    await batch.commit();
-    toast(
-      allocations.length > 1
-        ? `Pembayaran tercatat untuk ${allocations.length} tagihan`
-        : 'Pembayaran tercatat'
-    );
+    toast(count > 1 ? `Pembayaran tercatat untuk ${count} tagihan` : 'Pembayaran tercatat');
   }
 
   // ===== Corrections to one arrival of money =====
@@ -860,43 +852,40 @@ export function DataProvider({ children }) {
   }
 
   async function closeProjectAsDefault(projectId, { recoveredAmount = 0, accountId, date } = {}) {
-    const project = projects.find((p) => p.id === projectId);
-    if (!project) throw new Error('Project tidak ditemukan');
     const recv = Number(recoveredAmount) || 0;
+    if (recv > 0 && !accountId) throw new Error('Pilih rekening tujuan untuk pengembalian');
     const closeDate = date instanceof Date ? date : new Date();
 
-    const batch = writeBatch(db);
-    let recoveryTxId = null;
-    if (recv > 0) {
-      if (!accountId) throw new Error('Pilih rekening tujuan untuk pengembalian');
-      const creditedTo = creditMoneyIn(batch, accountId, recv);
-      const txRef = doc(collection(db, C('transactions')));
-      recoveryTxId = txRef.id;
-      batch.set(txRef, {
-        type: 'income',
-        amount: recv,
-        description: `Pengembalian sisa project: ${project.name}`,
-        date: Timestamp.fromDate(closeDate),
-        fromAccount: null,
-        toAccount: creditedTo,
-        debtId: null,
-        projectId,
-        createdAt: serverTimestamp(),
+    const lossAmount = await inProjectTransaction(projectId, (t, project, ref) => {
+      let recoveryTxId = null;
+      if (recv > 0) {
+        const creditedTo = creditMoneyIn(t, accountId, recv);
+        const txRef = doc(collection(db, C('transactions')));
+        recoveryTxId = txRef.id;
+        t.set(txRef, {
+          type: 'income',
+          amount: recv,
+          description: `Pengembalian sisa project: ${project.name}`,
+          date: Timestamp.fromDate(closeDate),
+          fromAccount: null,
+          toAccount: creditedTo,
+          debtId: null,
+          projectId,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      const totalReceived = projectReceivedTotal(project) + recv;
+      const loss = Math.max(0, (project.disbursedAmount || 0) - totalReceived);
+      t.update(ref, {
+        status: 'default',
+        closedAt: Timestamp.fromDate(closeDate),
+        finalRecovery: recv,
+        finalRecoveryTransactionId: recoveryTxId,
+        lossAmount: loss,
       });
-    }
-
-    const totalReceived = projectReceivedTotal(project) + recv;
-    const lossAmount = Math.max(0, (project.disbursedAmount || 0) - totalReceived);
-
-    batch.update(doc(db, C('projects'), projectId), {
-      status: 'default',
-      closedAt: Timestamp.fromDate(closeDate),
-      finalRecovery: recv,
-      finalRecoveryTransactionId: recoveryTxId,
-      lossAmount,
+      return loss;
     });
-
-    await batch.commit();
     toast(lossAmount > 0 ? 'Project ditutup, kerugian dicatat' : 'Project ditutup (BEP)');
   }
 
@@ -905,50 +894,47 @@ export function DataProvider({ children }) {
   // DROPS every remaining unpaid scheduled payment so the future income
   // projection disappears. The settlement becomes the new final payment.
   async function settleProjectEarly(projectId, { accountId, amount, date } = {}) {
-    const project = projects.find((p) => p.id === projectId);
-    if (!project) throw new Error('Project tidak ditemukan');
     const amt = Math.round(Number(amount) || 0);
     if (amt <= 0) throw new Error('Jumlah pelunasan harus lebih dari 0');
     if (!accountId) throw new Error('Pilih rekening tujuan');
     const settleDate = date instanceof Date ? date : new Date();
     const at = Timestamp.fromDate(settleDate);
 
-    const batch = writeBatch(db);
-    const creditedTo = creditMoneyIn(batch, accountId, amt);
-    const txRef = doc(collection(db, C('transactions')));
+    await inProjectTransaction(projectId, (t, project, ref) => {
+      const creditedTo = creditMoneyIn(t, accountId, amt);
+      const txRef = doc(collection(db, C('transactions')));
 
-    // The settlement is an arrival of money like any other, so it goes into
-    // receipts; see applySettlement for what happens when it does not.
-    const { payments, receipts, settleNo } = applySettlement(project, {
-      amount: amt,
-      at,
-      accountId: creditedTo,
-      transactionId: txRef.id,
+      // The settlement is an arrival of money like any other, so it goes into
+      // receipts; see applySettlement for what happens when it does not.
+      const { payments, receipts, settleNo } = applySettlement(project, {
+        amount: amt,
+        at,
+        accountId: creditedTo,
+        transactionId: txRef.id,
+      });
+
+      t.set(txRef, {
+        type: 'income',
+        amount: amt,
+        description: `Pelunasan dipercepat project: ${project.name}`,
+        date: at,
+        fromAccount: null,
+        toAccount: creditedTo,
+        debtId: null,
+        projectId,
+        paymentNo: settleNo,
+        receiptId: txRef.id,
+        createdAt: serverTimestamp(),
+      });
+
+      t.update(ref, {
+        payments,
+        receipts,
+        status: 'completed',
+        closedAt: at,
+        settledEarly: true,
+      });
     });
-
-    batch.set(txRef, {
-      type: 'income',
-      amount: amt,
-      description: `Pelunasan dipercepat project: ${project.name}`,
-      date: at,
-      fromAccount: null,
-      toAccount: creditedTo,
-      debtId: null,
-      projectId,
-      paymentNo: settleNo,
-      receiptId: txRef.id,
-      createdAt: serverTimestamp(),
-    });
-
-    batch.update(doc(db, C('projects'), projectId), {
-      payments,
-      receipts,
-      status: 'completed',
-      closedAt: at,
-      settledEarly: true,
-    });
-
-    await batch.commit();
     toast('Project dilunasi lebih cepat');
   }
 
@@ -958,53 +944,53 @@ export function DataProvider({ children }) {
   // - Reverse any recovery recorded when closing as macet
   // - Delete the project and all its related transactions
   async function deleteProject(id) {
-    const project = projects.find((p) => p.id === id);
-    if (!project) return;
-    const batch = writeBatch(db);
+    if (!projects.some((p) => p.id === id)) return;
+    const clawedBack = await inProjectTransaction(id, async (t, project, ref) => {
+      // Reads first (a transaction allows no read after a write): the recovery
+      // transaction says which account the macet recovery landed in.
+      const recoveryRef = project.finalRecoveryTransactionId
+        ? doc(db, C('transactions'), project.finalRecoveryTransactionId)
+        : null;
+      const recoverySnap = recoveryRef ? await t.get(recoveryRef) : null;
 
-    // 1. Return funding money to the source account, delete the funding transaction
-    if (project.fundingTransactionId) {
-      batch.delete(doc(db, C('transactions'), project.fundingTransactionId));
-    }
-    if (project.sourceAccountId && project.disbursedAmount) {
-      batch.update(doc(db, C('accounts'), project.sourceAccountId), {
-        balance: increment(project.disbursedAmount || 0),
-        updatedAt: serverTimestamp(),
-      });
-    }
+      // One balance change per account, however many arrivals landed there.
+      const deltas = new Map();
+      const move = (accountId, amount) => {
+        if (!accountId || !amount) return;
+        deltas.set(accountId, (deltas.get(accountId) || 0) + amount);
+      };
 
-    // 2. Claw back every received return from the account it was deposited to.
-    // Walks receipts, not rows: once one tagihan can be paid several times, the
-    // money lives on the receipts and a row-based loop would refund only one of
-    // them.
-    for (const r of project.receipts || []) {
-      const amt = Number(r?.amount) || 0;
-      if (r?.transactionId) {
-        batch.delete(doc(db, C('transactions'), r.transactionId));
+      // 1. Return the funding to the source account, delete its transaction.
+      if (project.fundingTransactionId) {
+        t.delete(doc(db, C('transactions'), project.fundingTransactionId));
       }
-      if (r?.accountId && amt) {
-        batch.update(doc(db, C('accounts'), r.accountId), {
-          balance: increment(-amt),
-          updatedAt: serverTimestamp(),
-        });
-      }
-    }
+      move(project.sourceAccountId, Number(project.disbursedAmount) || 0);
 
-    // 3. Reverse any recovery booked when the project was closed as macet
-    if (project.finalRecoveryTransactionId) {
-      batch.delete(doc(db, C('transactions'), project.finalRecoveryTransactionId));
-      const recoveryTx = transactions.find((t) => t.id === project.finalRecoveryTransactionId);
-      if (recoveryTx?.toAccount && project.finalRecovery) {
-        batch.update(doc(db, C('accounts'), recoveryTx.toAccount), {
-          balance: increment(-(project.finalRecovery || 0)),
-          updatedAt: serverTimestamp(),
-        });
+      // 2. Claw back every arrival from the account it landed in. Walks
+      // receipts, not rows: a tagihan paid several times has several.
+      for (const r of project.receipts || []) {
+        if (r?.transactionId) t.delete(doc(db, C('transactions'), r.transactionId));
+        move(r?.accountId, -(Number(r?.amount) || 0));
       }
-    }
 
-    batch.delete(doc(db, C('projects'), id));
-    await batch.commit();
-    const clawedBack = projectReceivedTotal(project);
+      // 3. Reverse any recovery booked when the project was closed as macet.
+      if (recoveryRef) {
+        t.delete(recoveryRef);
+        const to = recoverySnap?.exists() ? recoverySnap.data().toAccount : null;
+        move(to, -(Number(project.finalRecovery) || 0));
+      }
+
+      for (const [accountId, amount] of deltas) {
+        if (amount !== 0) {
+          t.update(doc(db, C('accounts'), accountId), {
+            balance: increment(amount),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+      t.delete(ref);
+      return projectReceivedTotal(project);
+    });
     toast(clawedBack > 0 ? 'Project dibatalkan, modal & return dikembalikan' : 'Project dibatalkan, modal dikembalikan');
   }
 
