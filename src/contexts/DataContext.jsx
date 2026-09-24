@@ -487,8 +487,13 @@ export function DataProvider({ children }) {
         const oldD = project.startDate?.toDate?.();
         return !sameDay(newD, oldD);
       })());
-    if (capitalChange && hasReceived) {
-      throw new Error('Modal/rekening/tanggal mulai tidak bisa diubah karena sudah ada pembayaran masuk.');
+    // A closed month (gabung, anggap lunas) keeps its own due date and amount
+    // through a schedule rebuild, so it pins the capital as money does.
+    const hasClosure = (project.payments || []).some((r) => r.closure);
+    if (capitalChange && (hasReceived || hasClosure)) {
+      throw new Error(
+        'Modal/rekening/tanggal mulai tidak bisa diubah karena sudah ada pembayaran masuk atau tagihan yang ditutup.'
+      );
     }
 
     // When the start date changes, the funding transaction must be re-dated too,
@@ -578,15 +583,19 @@ export function DataProvider({ children }) {
       }
       update.disbursedAmount = newDisbursed;
       update.sourceAccountId = newSourceId;
-      if (Object.keys(update).length > 0) {
-        batch.update(doc(db, C('projects'), id), update);
-      }
+      // A new version, so a sheet another device opened before this edit
+      // refuses to save on top of it (seenWriteId).
+      update.lastWriteId = doc(collection(db, C('projects'))).id;
+      batch.update(doc(db, C('projects'), id), update);
       await batch.commit();
       toast('Project tersimpan');
       return;
     }
 
     if (Object.keys(update).length === 0) return;
+    // A new version, so a sheet another device opened before this edit
+    // refuses to save on top of it (seenWriteId).
+    update.lastWriteId = doc(collection(db, C('projects'))).id;
     if (newFundingDate && project.fundingTransactionId) {
       // Keep the project doc and its funding transaction date in sync atomically.
       const batch = writeBatch(db);

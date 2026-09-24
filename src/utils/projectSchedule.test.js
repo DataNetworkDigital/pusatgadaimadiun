@@ -125,4 +125,18 @@ describe('recomputeUnpaidSchedule when money has already arrived', () => {
     );
     expect(() => recomputeUnpaidSchedule(rows, terms(4))).toThrow(/tunggakan yang digabung ke bulan 5/);
   });
+
+  it('says a carried month was carried, not paid, when a shorter duration would drop its tunggakan', () => {
+    const rows = generateProjectSchedule(terms(6)).map((r) =>
+      r.no === 5 ? { ...r, closure: { kind: 'carry', amount: 5_500_000, toNo: 6 } } : r
+    );
+    expect(() => recomputeUnpaidSchedule(rows, terms(5))).toThrow(/tunggakan yang digabung ke bulan 6/);
+  });
+
+  it('names a closed month as closed, not as paid', () => {
+    const rows = generateProjectSchedule(terms(6)).map((r) =>
+      r.no === 5 ? { ...r, closure: { kind: 'waive', amount: 5_500_000, reason: 'manual' } } : r
+    );
+    expect(() => recomputeUnpaidSchedule(rows, terms(4))).toThrow(/bulan 5 sudah dibayar atau ditutup/);
+  });
 });

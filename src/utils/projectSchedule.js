@@ -78,34 +78,36 @@ export function recomputeUnpaidSchedule(existingPayments, {
     if (p.receivedAmount != null || p.closure) paidByNo.set(p.no, p);
   }
 
+  // A tunggakan carried onto a later month lives on that month's number;
+  // shortening past it would drop the debt with the row. Checked first: the
+  // carried month itself is kept below, and would otherwise be reported as
+  // paid.
+  for (const p of existingPayments || []) {
+    const c = p?.closure;
+    if (c?.kind === 'carry' && c.toNo > months) {
+      throw new Error(
+        `Durasi tidak bisa dipendekkan ke ${months} bulan karena ada tunggakan yang digabung ke bulan ${c.toNo}.`
+      );
+    }
+  }
+
   // A kept row keeps its own amount, so it must also keep its place in the
   // schedule. Turning a paid bagi hasil into the pelunasan, or a pelunasan that
   // money reached into a bagi hasil, would leave the principal asked for twice
   // or not at all; a row past the new end would simply vanish with its money.
-  // Refused here until extensions arrive with Bagian C.
+  // Moving a pelunasan later is Mundur/Perpanjang's job.
   for (const [no, kept] of paidByNo) {
     if (no > months) {
       throw new Error(
-        `Durasi tidak bisa dipendekkan ke ${months} bulan karena bulan ${no} sudah menerima pembayaran.`
+        `Durasi tidak bisa dipendekkan ke ${months} bulan karena bulan ${no} sudah dibayar atau ditutup.`
       );
     }
     const type = no === months ? 'final' : 'interest';
     if (kept.type && kept.type !== type) {
       throw new Error(
         type === 'final'
-          ? `Durasi tidak bisa dipendekkan ke ${months} bulan karena bulan ${no} sudah dibayar sebagai bagi hasil.`
-          : `Durasi tidak bisa diperpanjang karena pelunasan (bulan ${no}) sudah menerima pembayaran.`
-      );
-    }
-  }
-
-  // A tunggakan carried onto a later month lives on that month's number;
-  // shortening past it would drop the debt with the row.
-  for (const p of existingPayments || []) {
-    const c = p?.closure;
-    if (c?.kind === 'carry' && c.toNo > months) {
-      throw new Error(
-        `Durasi tidak bisa dipendekkan ke ${months} bulan karena ada tunggakan yang digabung ke bulan ${c.toNo}.`
+          ? `Durasi tidak bisa dipendekkan ke ${months} bulan karena bulan ${no} sudah dibayar atau ditutup sebagai bagi hasil.`
+          : `Durasi tidak bisa diperpanjang karena pelunasan (bulan ${no}) sudah dibayar atau ditutup.`
       );
     }
   }

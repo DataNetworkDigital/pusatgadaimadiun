@@ -1,6 +1,6 @@
 import Modal from './Modal';
 
-export default function ConfirmDialog({ open, onClose, onConfirm, title, message, confirmLabel = 'Hapus', confirmVariant = 'danger' }) {
+export default function ConfirmDialog({ open, onClose, onConfirm, title, message, confirmLabel = 'Hapus', confirmVariant = 'danger', confirmDisabled = false }) {
   return (
     <Modal
       open={open}
@@ -12,6 +12,7 @@ export default function ConfirmDialog({ open, onClose, onConfirm, title, message
           <button
             type="button"
             className={confirmVariant === 'danger' ? 'btn-danger flex-1' : 'btn-primary flex-1'}
+            disabled={confirmDisabled}
             onClick={() => { onConfirm(); onClose(); }}
           >
             {confirmLabel}

@@ -118,8 +118,21 @@ for (const item of plan.projects) {
   });
   if (didWrite) wrote += 1;
 }
+// One transaction that cannot be updated (deleted since the report) must not
+// stop the rest; it is listed at the end. Running the script again is safe.
+let tagged = 0;
+const failed = [];
 for (const item of plan.transactions) {
-  await updateDoc(doc(db, C('transactions'), item.id), { receiptId: item.receiptId });
+  try {
+    await updateDoc(doc(db, C('transactions'), item.id), { receiptId: item.receiptId });
+    tagged += 1;
+  } catch (e) {
+    failed.push({ id: item.id, error: e.code || e.message });
+  }
 }
-console.log(`\nSelesai: ${wrote} project disimpan receipts-nya, ${plan.transactions.length} transaksi diberi receiptId.`);
-process.exit(0);
+console.log(`\nSelesai: ${wrote} project disimpan receipts-nya, ${tagged} transaksi diberi receiptId.`);
+if (failed.length) {
+  console.log(`${failed.length} transaksi gagal diberi receiptId:`);
+  for (const f of failed) console.log('  -', JSON.stringify(f));
+}
+process.exit(failed.length ? 1 : 0);

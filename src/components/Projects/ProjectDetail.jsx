@@ -235,22 +235,25 @@ function PaymentRow({
   );
 }
 
-// What reopening bulan `no` does, in the owner's words.
-// What reopening does, or why it cannot be done yet, before the owner taps.
-function reopenMessage(project, no) {
+// What reopening bulan `no` does, or why it cannot be done yet, in the
+// owner's words, before he taps.
+function reopenPreview(project, no) {
   const c = (project?.payments || []).find((r) => r.no === no)?.closure;
-  if (!c) return '';
+  if (!c) return { ok: false, message: '' };
   let update;
   try {
     ({ update } = applyReopenRemainder(project, no));
   } catch (e) {
-    return `Belum bisa dibuka. ${e.message}`;
+    return { ok: false, message: `Belum bisa dibuka. ${e.message}` };
   }
   const active = update.status === 'active' ? ' Project ini aktif lagi.' : '';
   if (c.kind === 'carry') {
-    return `Sisa ${formatCurrency(c.amount)} kembali ditagih di bulan ${no}, dan tunggakan di bulan ${c.toNo} dihapus.${active}`;
+    return {
+      ok: true,
+      message: `Sisa ${formatCurrency(c.amount)} kembali ditagih di bulan ${no}, dan tunggakan di bulan ${c.toNo} dihapus.${active}`,
+    };
   }
-  return `Sisa ${formatCurrency(c.amount)} kembali ditagih di bulan ${no}.${active}`;
+  return { ok: true, message: `Sisa ${formatCurrency(c.amount)} kembali ditagih di bulan ${no}.${active}` };
 }
 
 export default function ProjectDetail() {
@@ -285,6 +288,7 @@ export default function ProjectDetail() {
   }
 
   const summary = projectSummary(project);
+  const reopen = reopenNo !== null ? reopenPreview(project, reopenNo) : { ok: false, message: '' };
   const isActive = project.status === 'active';
   const isCompleted = project.status === 'completed';
   const isDefault = project.status === 'default';
@@ -553,9 +557,10 @@ export default function ProjectDetail() {
           }
         }}
         title={`Buka lagi sisa bulan ${reopenNo}?`}
-        message={reopenMessage(project, reopenNo)}
+        message={reopen.message}
         confirmLabel="Buka lagi"
         confirmVariant="primary"
+        confirmDisabled={!reopen.ok}
       />
       <ReceiptSheet
         open={receiving !== null}

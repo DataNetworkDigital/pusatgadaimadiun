@@ -4,7 +4,7 @@ import {
 import { db } from '../firebase';
 import { buildDemoSeed } from './demoSeedData';
 import { demoProjectLedger } from './demoLedger';
-import { demoResetDecision, RESET_STALE_MS } from './demoResetDecision';
+import { demoResetDecision, RESET_WAIT_MS } from './demoResetDecision';
 
 const COLLECTIONS = [
   'demo_accounts',
@@ -152,26 +152,24 @@ async function seed() {
 }
 
 // Today's claim on the reset, or what to do instead (see demoResetDecision).
-async function claimReset(settingsRef, todayStr) {
+// Returns the decision and the id of the claim it saw running, if any.
+async function claimReset(settingsRef, todayStr, stalledId) {
   return runTransaction(db, async (txn) => {
     const snap = await txn.get(settingsRef);
     const data = snap.exists() ? snap.data() : null;
-    const decision = demoResetDecision(
-      data && { ...data, resetStartedAtMs: data.resetStartedAt?.toMillis?.() ?? null },
-      todayStr,
-      Date.now()
-    );
+    const decision = demoResetDecision(data, todayStr, stalledId);
     if (decision === 'reset') {
       const claim = {
         lastResetDate: todayStr,
         dailyVisitors: 0,
         resetInProgress: true,
+        resetId: doc(collection(db, 'demo_config')).id,
         resetStartedAt: serverTimestamp(),
       };
       if (data) txn.update(settingsRef, claim);
       else txn.set(settingsRef, { ...claim, visitorCount: 0 });
     }
-    return decision;
+    return { decision, runningId: data?.resetId ?? '' };
   });
 }
 
@@ -179,15 +177,18 @@ export async function ensureDemoFresh() {
   const todayStr = getWIBDateString();
   const settingsRef = doc(db, ...SETTINGS_PATH);
 
-  let decision = await claimReset(settingsRef, todayStr);
+  let { decision, runningId } = await claimReset(settingsRef, todayStr);
   // Another visit is refilling the demo: keep the loading screen up until it
-  // is done rather than show a demo being emptied and refilled. If that
-  // refill died, the decision turns to 'reset' and this visit redoes it.
-  const waitUntil = Date.now() + RESET_STALE_MS;
+  // is done rather than show a demo being emptied and refilled.
+  const watched = runningId;
+  const waitUntil = Date.now() + RESET_WAIT_MS;
   while (decision === 'wait' && Date.now() < waitUntil) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    decision = await claimReset(settingsRef, todayStr);
+    ({ decision } = await claimReset(settingsRef, todayStr));
   }
+  // Still running after a whole wait on this visitor's own clock: that refill
+  // died partway. Take over exactly that one; a newer claim is left alone.
+  if (decision === 'wait') ({ decision } = await claimReset(settingsRef, todayStr, watched));
   if (decision !== 'reset') return;
 
   try {

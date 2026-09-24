@@ -11,18 +11,20 @@
  * - 'wait':  another visit is refilling it right now.
  * - 'ready': today's demo is in place.
  *
- * @param data  the settings document, or null when there is none, with
- *              `resetStartedAtMs` read from its resetStartedAt timestamp.
+ * A refill that died partway (tab closed, connection lost) would block the
+ * demo all day. A visit that has itself waited RESET_WAIT_MS for one claim
+ * may take over exactly that claim: `stalledId` is its id ('' for a claim
+ * made before claims carried one). Time is measured on the waiting visit's
+ * own clock, never against another device's, so a visitor whose clock runs
+ * fast cannot cut a running refill short.
  */
 
-// A refill takes seconds. One still running after this long died partway
-// (tab closed, connection lost) and would otherwise block the demo all day.
-export const RESET_STALE_MS = 2 * 60 * 1000;
+// A refill takes seconds; a visit gives another's refill this long.
+export const RESET_WAIT_MS = 2 * 60 * 1000;
 
-export function demoResetDecision(data, today, now) {
+export function demoResetDecision(data, today, stalledId) {
   if (!data || data.lastResetDate !== today) return 'reset';
   if (!data.resetInProgress) return 'ready';
-  const started = Number(data.resetStartedAtMs);
-  if (!Number.isFinite(started) || now - started > RESET_STALE_MS) return 'reset';
+  if (stalledId != null && (data.resetId ?? '') === stalledId) return 'reset';
   return 'wait';
 }
