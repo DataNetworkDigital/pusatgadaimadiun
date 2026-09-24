@@ -6,7 +6,7 @@ import Card from '../common/Card';
 import SectionTitle from '../common/SectionTitle';
 import Pill from '../common/Pill';
 import ConfirmDialog from '../common/ConfirmDialog';
-import PaymentConfirmSheet from './PaymentConfirmSheet';
+import ReceiptManageSheet from './ReceiptManageSheet';
 import ReceiptSheet from './ReceiptSheet';
 import CloseProjectSheet from './CloseProjectSheet';
 import SettleProjectSheet from './SettleProjectSheet';
@@ -44,7 +44,7 @@ function StatRow({ label, value, valueClass = 'text-ink', isLast }) {
   );
 }
 
-function PaymentRow({ project, payment, onReceive, onEdit, editable, isLast }) {
+function PaymentRow({ project, payment, onReceive, onManage, canReceive, editable, accountName, isLast }) {
   const due = toDate(payment.dueDate);
   const recv = toDate(payment.receivedDate);
   const isPaid = isSettled(project, payment);
@@ -57,18 +57,13 @@ function PaymentRow({ project, payment, onReceive, onEdit, editable, isLast }) {
   const arrivals = (project.receipts || [])
     .map((r) => ({ r, part: (r.allocations || []).find((a) => a.no === payment.no) }))
     .filter((x) => x.part);
-  // Edit handles a tagihan paid by one arrival that paid nothing else;
-  // updateProjectPayment refuses the other shapes until B3, so the button
-  // should not be offered for them.
-  const editableShape = arrivals.length <= 1 && (arrivals[0]?.r.allocations || []).length <= 1;
-  // A settled tagihan already shows its arrival on its own line. A partly paid
-  // one shows it nowhere else, so list it even when there is only one.
+  // A settled tagihan paid in one arrival already shows it on its own line and
+  // opens it from Edit. Otherwise every arrival is listed and opens on tap.
   const showArrivals = arrivals.length > 1 || (arrivals.length === 1 && !isPaid);
 
   // The row's own border-b lives on this outer wrapper, not on the flex row
   // below, so it falls after the arrivals list instead of cutting between a
-  // row and its own arrivals (confirmed in-browser: the row+arrivals need to
-  // read as one block before the next tagihan starts).
+  // row and its own arrivals.
   return (
     <div className={isLast ? '' : 'border-b border-line-soft'}>
       <div className="flex items-center gap-3 py-3">
@@ -113,7 +108,7 @@ function PaymentRow({ project, payment, onReceive, onEdit, editable, isLast }) {
           >
             {formatCurrency(isPaid ? rowReceived(project, payment) : payment.expectedAmount, false)}
           </div>
-          {!isPaid && (
+          {!isPaid && canReceive && (
             <button
               type="button"
               onClick={() => onReceive(payment)}
@@ -122,10 +117,10 @@ function PaymentRow({ project, payment, onReceive, onEdit, editable, isLast }) {
               Konfirmasi →
             </button>
           )}
-          {isPaid && editable && editableShape && (
+          {isPaid && editable && arrivals.length === 1 && (
             <button
               type="button"
-              onClick={() => onEdit(payment)}
+              onClick={() => onManage(arrivals[0].r.id)}
               className="mt-1 text-[12px] font-semibold text-indigo active:opacity-70"
             >
               Edit →
@@ -135,12 +130,35 @@ function PaymentRow({ project, payment, onReceive, onEdit, editable, isLast }) {
       </div>
       {showArrivals && (
         <div className="pb-2 pl-12 space-y-0.5">
-          {arrivals.map(({ r, part }) => (
-            <div key={r.id} className="flex justify-between text-[12px] text-ink-mute">
-              <span>{formatDate(r.date, { short: true })}</span>
-              <span className="font-num">{formatCurrency(part.amount, false)}</span>
-            </div>
-          ))}
+          {arrivals.map(({ r, part }) => {
+            const split = (r.allocations || []).length > 1;
+            const line = (
+              <>
+                <span>
+                  {formatDate(r.date, { short: true })} · {accountName(r.accountId)}
+                </span>
+                <span className="font-num">
+                  {formatCurrency(part.amount, false)}
+                  {split && ` · sebagian dari ${formatCurrency(r.amount, false)}`}
+                  {editable && <span className="text-indigo"> ›</span>}
+                </span>
+              </>
+            );
+            return editable ? (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => onManage(r.id)}
+                className="w-full flex justify-between gap-3 text-left text-[12px] text-ink-mute active:opacity-70"
+              >
+                {line}
+              </button>
+            ) : (
+              <div key={r.id} className="flex justify-between gap-3 text-[12px] text-ink-mute">
+                {line}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -151,9 +169,9 @@ export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDemo } = useDemo();
-  const { projects, accounts, recordReceipt, updateProjectPayment, closeProjectAsDefault, settleProjectEarly, deleteProject, updateProject } =
+  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeProjectAsDefault, settleProjectEarly, deleteProject, updateProject } =
     useData();
-  const [paying, setPaying] = useState(null);
+  const [managing, setManaging] = useState(null); // a receipt id, or null when closed
   const [receiving, setReceiving] = useState(null); // the tagihan number, or null when closed
   const [closing, setClosing] = useState(false);
   const [settling, setSettling] = useState(false);
@@ -192,11 +210,6 @@ export default function ProjectDetail() {
   const returnRateLabel = isTieredRate
     ? `${rTier1}% (bln 1-3) / ${rTier2}% (bln 4+)`
     : `${rTier1}% · ${formatCurrency((project.principalAmount * rTier1) / 100)}`;
-
-  async function handleConfirmPayment(data) {
-    if (!paying) return;
-    await updateProjectPayment(project.id, paying.no, data);
-  }
 
   async function handleReceipt(data) {
     await recordReceipt(project.id, data);
@@ -360,9 +373,11 @@ export default function ProjectDetail() {
             key={p.no}
             project={project}
             payment={p}
-            onReceive={(pay) => isActive && setReceiving(pay.no)}
-            onEdit={(pay) => (isActive || isCompleted) && setPaying(pay)}
+            onReceive={(pay) => setReceiving(pay.no)}
+            onManage={(receiptId) => setManaging(receiptId)}
+            canReceive={isActive}
             editable={isActive || isCompleted}
+            accountName={accountName}
             isLast={i === project.payments.length - 1}
           />
         ))}
@@ -415,13 +430,15 @@ export default function ProjectDetail() {
         accounts={accounts}
         initial={project}
       />
-      <PaymentConfirmSheet
-        open={!!paying}
-        onClose={() => setPaying(null)}
+      <ReceiptManageSheet
+        open={managing !== null}
+        onClose={() => setManaging(null)}
         project={project}
-        payment={paying}
+        receiptId={managing}
         accounts={accounts}
-        onConfirm={handleConfirmPayment}
+        onEdit={(data) => updateReceipt(project.id, managing, data)}
+        onMove={(startNo) => moveReceipt(project.id, managing, startNo)}
+        onCancel={() => cancelReceipt(project.id, managing)}
       />
       <ReceiptSheet
         open={receiving !== null}
