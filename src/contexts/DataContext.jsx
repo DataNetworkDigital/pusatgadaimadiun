@@ -15,6 +15,7 @@ import { allocateReceipt, openRows } from '../utils/allocation';
 import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
 import { applySettlement } from '../utils/settlement';
 import { applyReceiptCancel, applyReceiptEdit, applyReceiptMove } from '../utils/receiptOps';
+import { applyCloseRemainder, applyReopenRemainder } from '../utils/remainderOps';
 import { toDate } from '../utils/formatDate';
 import { isProjectMoney } from '../utils/projectMoney';
 import { formatCurrency } from '../utils/formatCurrency';
@@ -961,6 +962,48 @@ export function DataProvider({ children }) {
     );
   }
 
+  // ===== What is left on a tagihan, closed without money =====
+  // No money moves, so no balance or transaction changes: only the schedule
+  // (and, for an old shortfall, its payment) through the same transaction,
+  // write id and screen-version check as every other project write.
+
+  async function closeRemainder(projectId, no, { kind, note = '', seenWriteId } = {}) {
+    // Made before the transaction so a rerun can recognise its own closure.
+    const closeId = doc(collection(db, C('projects'))).id;
+    const outcome = await inProjectTransaction(projectId, (t, project, ref, writeId) => {
+      const { update, closure } = applyCloseRemainder(project, no, {
+        kind,
+        note,
+        at: Timestamp.now(),
+        id: closeId,
+      });
+      t.update(ref, { ...update, lastWriteId: writeId });
+      return { status: update.status, closure };
+    }, {
+      alreadyDone: (p) => (p.payments || []).some((r) => r.no === no && r.closure?.id === closeId),
+      seenWriteId,
+    });
+    const done = outcome?.status === 'completed' ? ', project selesai' : '';
+    toast(
+      kind === 'carry'
+        ? `Sisa ${formatCurrency(outcome?.closure?.amount)} digabung ke bulan ${outcome?.closure?.toNo}${done}`
+        : `Sisa bulan ${no} dianggap lunas${done}`
+    );
+  }
+
+  async function reopenRemainder(projectId, no, { seenWriteId } = {}) {
+    const status = await inProjectTransaction(projectId, (t, project, ref, writeId) => {
+      const { update } = applyReopenRemainder(project, no);
+      t.update(ref, { ...update, lastWriteId: writeId });
+      return update.status;
+    }, {
+      // Open already: this call's own earlier attempt, or another device.
+      alreadyDone: (p) => !(p.payments || []).find((r) => r.no === no)?.closure,
+      seenWriteId,
+    });
+    toast(status === 'active' ? `Sisa bulan ${no} dibuka lagi, project aktif lagi` : `Sisa bulan ${no} dibuka lagi`);
+  }
+
   async function closeProjectAsDefault(projectId, { recoveredAmount = 0, accountId, date } = {}) {
     const recv = Number(recoveredAmount) || 0;
     if (recv > 0 && !accountId) throw new Error('Pilih rekening tujuan untuk pengembalian');
@@ -1147,7 +1190,7 @@ export function DataProvider({ children }) {
     addTransaction, updateTransaction, deleteTransaction,
     addDebt, updateDebt, deleteDebt, payInstallment,
     addReminder, updateReminder, deleteReminder,
-    addProject, updateProject, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeProjectAsDefault, settleProjectEarly, deleteProject,
+    addProject, updateProject, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, closeProjectAsDefault, settleProjectEarly, deleteProject,
     resetAllData,
   };
 
