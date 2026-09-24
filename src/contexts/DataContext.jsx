@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
   collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot,
-  query, orderBy, serverTimestamp, writeBatch, getDocs, increment, Timestamp,
+  query, orderBy, serverTimestamp, writeBatch, getDocs, increment, Timestamp, runTransaction,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from './AuthContext';
@@ -14,7 +14,8 @@ import { notifyTelegram, syncToDanaTrack } from '../utils/telegram';
 import { allocateReceipt } from '../utils/allocation';
 import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
 import { applySettlement } from '../utils/settlement';
-import { applyPaymentEdit } from '../utils/paymentEdit';
+import { applyReceiptCancel, applyReceiptEdit, applyReceiptMove } from '../utils/receiptOps';
+import { toDate } from '../utils/formatDate';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const DataContext = createContext(null);
@@ -590,36 +591,69 @@ export function DataProvider({ children }) {
     toast('Project tersimpan');
   }
 
-  // Resolves where money that just came in should land, and credits it.
-  // `account` is either an account id or the string 'cash'. Cash uses the Kas
-  // account when the owner has one and creates it otherwise, so cash on hand
-  // still counts in the dashboard total instead of vanishing.
-  function creditMoneyIn(batch, account, amount) {
-    if (account !== 'cash') {
-      batch.update(doc(db, C('accounts'), account), {
-        balance: increment(amount),
-        updatedAt: serverTimestamp(),
-      });
-      return account;
-    }
+  // Where money that comes in lands. `account` is either an account id or the
+  // string 'cash'. Cash uses the Kas account when the owner has one; otherwise
+  // it is created in the same write (`createRef`), so cash on hand still counts
+  // in the dashboard total instead of vanishing.
+  function resolveMoneyIn(account) {
+    if (account !== 'cash') return { id: account, createRef: null };
     const existing = findCashAccount(accounts);
-    if (existing) {
-      batch.update(doc(db, C('accounts'), existing.id), {
+    if (existing) return { id: existing.id, createRef: null };
+    const createRef = doc(collection(db, C('accounts')));
+    return { id: createRef.id, createRef };
+  }
+
+  // Credits money to a resolved account. `writer` is a write batch or a
+  // Firestore transaction; both have set() and update().
+  function creditResolved(writer, target, amount) {
+    if (target.createRef) {
+      writer.set(target.createRef, {
+        name: CASH_ACCOUNT_NAME,
+        accountNumber: '',
+        kind: 'cash',
+        balance: amount,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      writer.update(doc(db, C('accounts'), target.id), {
         balance: increment(amount),
         updatedAt: serverTimestamp(),
       });
-      return existing.id;
     }
-    const accRef = doc(collection(db, C('accounts')));
-    batch.set(accRef, {
-      name: CASH_ACCOUNT_NAME,
-      accountNumber: '',
-      kind: 'cash',
-      balance: amount,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    return accRef.id;
+    return target.id;
+  }
+
+  function creditMoneyIn(writer, account, amount) {
+    return creditResolved(writer, resolveMoneyIn(account), amount);
+  }
+
+  // Writers of a project's money read the project from the server inside a
+  // Firestore transaction and write in the same one. Reading React state
+  // instead can start from a stale receipts array when two devices save at
+  // the same moment, and the second save would erase the first receipt while
+  // its transaction and balance change survive; a transaction retries with
+  // the fresh document instead. It needs a connection: offline it fails at
+  // once, which beats showing a change that is not stored (the app keeps no
+  // offline cache, so such a change is lost when the app closes).
+  async function inProjectTransaction(projectId, work) {
+    try {
+      return await runTransaction(db, async (t) => {
+        const ref = doc(db, C('projects'), projectId);
+        const snap = await t.get(ref);
+        if (!snap.exists()) throw new Error('Project tidak ditemukan');
+        return work(t, normalizeProject({ id: snap.id, ...snap.data() }), ref);
+      });
+    } catch (e) {
+      if (e?.code === 'unavailable' || /offline/i.test(e?.message || '')) {
+        throw new Error('Koneksi internet terputus. Tidak ada yang tersimpan, coba lagi.');
+      }
+      throw e;
+    }
+  }
+
+  function receiptDescription(project, allocations) {
+    return `Pembayaran project: ${project.name} (bln ${allocations.map((a) => a.no).join(', ')})`;
   }
 
   // One arrival of money: allocated across the tagihan it covers, oldest first,
@@ -710,71 +744,112 @@ export function DataProvider({ children }) {
     );
   }
 
-  // Edit an already-received payment. Re-syncs the recorded income transaction
-  // and the account balance: old effect is reversed, new effect applied.
-  // Amount, target account, and date can all change.
-  async function updateProjectPayment(projectId, paymentNo, { accountId, amount, date }) {
-    const project = projects.find((p) => p.id === projectId);
-    if (!project) throw new Error('Project tidak ditemukan');
-    const payment = (project.payments || []).find((p) => p.no === paymentNo);
-    if (!payment) throw new Error('Pembayaran tidak ditemukan');
-    if (payment.receivedAmount == null) throw new Error('Pembayaran ini belum diterima');
-    const newAmt = Math.round(Number(amount) || 0);
-    if (newAmt <= 0) throw new Error('Jumlah harus lebih dari 0');
-    if (!accountId) throw new Error('Pilih rekening tujuan');
+  // ===== Corrections to one arrival of money =====
+  // Each reads the project inside a transaction and decides the correction
+  // with receiptOps, which refuses before anything is written; then it moves
+  // the money and writes the whole update receiptOps returned.
 
-    const oldAmt = Number(payment.receivedAmount) || 0;
-    const oldAccountId = payment.accountId;
-    const recvDate = date instanceof Date
-      ? date
-      : (payment.receivedDate?.toDate?.() || new Date());
+  async function updateReceipt(projectId, receiptId, { amount, date, account }) {
+    if (!account) throw new Error('Pilih rekening tujuan');
+    const status = await inProjectTransaction(projectId, async (t, project, ref) => {
+      const receipt = (project.receipts || []).find((r) => r.id === receiptId);
+      if (!receipt) throw new Error('Pembayaran tidak ditemukan');
+      // Reads before writes: a legacy receipt's transaction may be missing.
+      const txRef = receipt.transactionId ? doc(db, C('transactions'), receipt.transactionId) : null;
+      const txSnap = txRef ? await t.get(txRef) : null;
 
-    // Decided before anything is written: refuses the cases this stage cannot
-    // edit yet, and says what the correction does to the tagihan's status.
-    const edited = applyPaymentEdit(project, paymentNo, {
-      amount: newAmt,
-      at: Timestamp.fromDate(recvDate),
-      accountId,
+      const recvDate = date instanceof Date ? date : toDate(receipt.date) || new Date();
+      const at = Timestamp.fromDate(recvDate);
+      const amt = Math.round(Number(amount) || 0);
+      const target = resolveMoneyIn(account);
+      const { update, allocations } = applyReceiptEdit(project, receiptId, {
+        amount: amt,
+        at,
+        accountId: target.id,
+      });
+
+      // One net change when the money stays in the same account.
+      const oldAmt = Number(receipt.amount) || 0;
+      if (!target.createRef && target.id === receipt.accountId) {
+        const delta = amt - oldAmt;
+        if (delta !== 0) {
+          t.update(doc(db, C('accounts'), target.id), {
+            balance: increment(delta),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      } else {
+        if (receipt.accountId && oldAmt) {
+          t.update(doc(db, C('accounts'), receipt.accountId), {
+            balance: increment(-oldAmt),
+            updatedAt: serverTimestamp(),
+          });
+        }
+        creditResolved(t, target, amt);
+      }
+
+      if (txSnap?.exists()) {
+        const monthsChanged =
+          allocations.map((a) => a.no).join() !== (receipt.allocations || []).map((a) => a.no).join();
+        t.update(txRef, {
+          amount: amt,
+          toAccount: target.id,
+          date: at,
+          paymentNo: allocations[0].no,
+          receiptId: receipt.id,
+          ...(monthsChanged ? { description: receiptDescription(project, allocations) } : {}),
+        });
+      }
+      t.update(ref, update);
+      return update.status;
     });
+    toast(
+      status === 'active'
+        ? 'Pembayaran diperbarui, project aktif lagi'
+        : status === 'completed'
+          ? 'Pembayaran diperbarui, project selesai'
+          : 'Pembayaran diperbarui'
+    );
+  }
 
-    const batch = writeBatch(db);
+  async function moveReceipt(projectId, receiptId, startNo) {
+    const status = await inProjectTransaction(projectId, async (t, project, ref) => {
+      const receipt = (project.receipts || []).find((r) => r.id === receiptId);
+      if (!receipt) throw new Error('Pembayaran tidak ditemukan');
+      const txRef = receipt.transactionId ? doc(db, C('transactions'), receipt.transactionId) : null;
+      const txSnap = txRef ? await t.get(txRef) : null;
 
-    // Adjust balances. If the account is unchanged, apply a single net delta
-    // (two increments on the same doc in one batch would not stack reliably).
-    if (oldAccountId && oldAccountId === accountId) {
-      const delta = newAmt - oldAmt;
-      if (delta !== 0) {
-        batch.update(doc(db, C('accounts'), accountId), {
-          balance: increment(delta),
+      const { update, allocations } = applyReceiptMove(project, receiptId, Number(startNo));
+      if (txSnap?.exists()) {
+        t.update(txRef, {
+          paymentNo: allocations[0].no,
+          description: receiptDescription(project, allocations),
+          receiptId: receipt.id,
+        });
+      }
+      t.update(ref, update);
+      return update.status;
+    });
+    toast(status === 'active' ? 'Pembayaran dipindah, project aktif lagi' : 'Pembayaran dipindah');
+  }
+
+  async function cancelReceipt(projectId, receiptId) {
+    const status = await inProjectTransaction(projectId, (t, project, ref) => {
+      const receipt = (project.receipts || []).find((r) => r.id === receiptId);
+      if (!receipt) throw new Error('Pembayaran tidak ditemukan');
+      const { update } = applyReceiptCancel(project, receiptId);
+      const amt = Number(receipt.amount) || 0;
+      if (receipt.accountId && amt) {
+        t.update(doc(db, C('accounts'), receipt.accountId), {
+          balance: increment(-amt),
           updatedAt: serverTimestamp(),
         });
       }
-    } else {
-      if (oldAccountId) {
-        batch.update(doc(db, C('accounts'), oldAccountId), {
-          balance: increment(-oldAmt),
-          updatedAt: serverTimestamp(),
-        });
-      }
-      batch.update(doc(db, C('accounts'), accountId), {
-        balance: increment(newAmt),
-        updatedAt: serverTimestamp(),
-      });
-    }
-
-    // Re-sync the recorded income transaction
-    if (payment.transactionId) {
-      batch.update(doc(db, C('transactions'), payment.transactionId), {
-        amount: newAmt,
-        toAccount: accountId,
-        date: Timestamp.fromDate(recvDate),
-      });
-    }
-
-    batch.update(doc(db, C('projects'), projectId), edited);
-
-    await batch.commit();
-    toast(edited.status === 'active' ? 'Pembayaran diperbarui, project aktif lagi' : 'Pembayaran diperbarui');
+      if (receipt.transactionId) t.delete(doc(db, C('transactions'), receipt.transactionId));
+      t.update(ref, update);
+      return update.status;
+    });
+    toast(status === 'active' ? 'Pembayaran dibatalkan, project aktif lagi' : 'Pembayaran dibatalkan');
   }
 
   async function closeProjectAsDefault(projectId, { recoveredAmount = 0, accountId, date } = {}) {
@@ -949,7 +1024,7 @@ export function DataProvider({ children }) {
     addTransaction, updateTransaction, deleteTransaction,
     addDebt, updateDebt, deleteDebt, payInstallment,
     addReminder, updateReminder, deleteReminder,
-    addProject, updateProject, recordReceipt, updateProjectPayment, closeProjectAsDefault, settleProjectEarly, deleteProject,
+    addProject, updateProject, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeProjectAsDefault, settleProjectEarly, deleteProject,
     resetAllData,
   };
 

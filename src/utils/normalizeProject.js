@@ -8,10 +8,10 @@
  * This does not itself write anything. It does, however, reach stored documents
  * indirectly, because what React state holds is the normalized shape:
  *
- * - recordReceipt, updateProjectPayment and settleProjectEarly write the whole
- *   `receipts` array back, derived entries included. From that write on the
- *   document stores receipts, this function returns it untouched, and nothing
- *   is derived for that project ever again. Every writer that moves money must
+ * - recordReceipt, updateReceipt, moveReceipt, cancelReceipt and
+ *   settleProjectEarly write the whole `receipts` array back, derived entries
+ *   included. From that write on the document stores receipts, this function
+ *   returns it untouched, and nothing is derived for that project ever again. Every writer that moves money must
  *   therefore keep `receipts` complete: an arrival written only onto a row
  *   reads as unpaid.
  * - updateProject, when a schedule change runs recomputeUnpaidSchedule, writes
