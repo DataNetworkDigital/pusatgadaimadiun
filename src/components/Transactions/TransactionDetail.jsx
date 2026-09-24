@@ -1,14 +1,21 @@
+import { Link } from 'react-router-dom';
 import Modal from '../common/Modal';
+import { useData } from '../../contexts/DataContext';
+import { useDemo } from '../../contexts/DemoContext';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
+import { projectOfTransaction } from '../../utils/projectMoney';
 
 const TYPE_LABEL = { income: 'Pemasukan', expense: 'Pengeluaran', transfer: 'Transfer' };
 
 export default function TransactionDetail({ tx, accounts, open, onClose, onEdit, onDelete }) {
+  const { projects } = useData();
+  const { isDemo } = useDemo();
   if (!tx) return null;
   const accountName = (id) => accounts.find((a) => a.id === id)?.name || '-';
   const color = tx.type === 'income' ? 'text-income' : tx.type === 'transfer' ? 'text-transfer' : 'text-expense';
   const sign = tx.type === 'income' ? '+' : tx.type === 'transfer' ? '' : '-';
+  const project = projectOfTransaction(tx, projects);
 
   return (
     <Modal
@@ -16,10 +23,20 @@ export default function TransactionDetail({ tx, accounts, open, onClose, onEdit,
       onClose={onClose}
       title="Detail Transaksi"
       footer={
-        <div className="flex gap-2">
-          <button className="btn-secondary flex-1" onClick={() => onEdit(tx)}>Edit</button>
-          <button className="btn-danger flex-1" onClick={() => onDelete(tx)}>Hapus</button>
-        </div>
+        project ? (
+          <Link
+            to={`${isDemo ? '/demo' : ''}/project/${project.id}`}
+            onClick={onClose}
+            className="btn-primary w-full block text-center"
+          >
+            Buka project
+          </Link>
+        ) : (
+          <div className="flex gap-2">
+            <button className="btn-secondary flex-1" onClick={() => onEdit(tx)}>Edit</button>
+            <button className="btn-danger flex-1" onClick={() => onDelete(tx)}>Hapus</button>
+          </div>
+        )
       }
     >
       <div className="text-center mb-4">
@@ -52,6 +69,11 @@ export default function TransactionDetail({ tx, accounts, open, onClose, onEdit,
           </div>
         )}
       </dl>
+      {project && (
+        <p className="mt-4 text-[13px] text-ink-soft leading-snug">
+          Transaksi ini milik project {project.name}. Ubah atau batalkan dari halaman project.
+        </p>
+      )}
     </Modal>
   );
 }

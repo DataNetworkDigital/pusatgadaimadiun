@@ -16,6 +16,7 @@ import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
 import { applySettlement } from '../utils/settlement';
 import { applyReceiptCancel, applyReceiptEdit, applyReceiptMove } from '../utils/receiptOps';
 import { toDate } from '../utils/formatDate';
+import { projectOfTransaction } from '../utils/projectMoney';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const DataContext = createContext(null);
@@ -152,9 +153,14 @@ export function DataProvider({ children }) {
     return txRef.id;
   }
 
+  // Defence in depth for the Transaksi page, which hides Edit and Hapus for
+  // project money: see projectOfTransaction.
+  const PROJECT_TX_MESSAGE = 'Transaksi ini milik project. Ubah atau batalkan dari halaman project.';
+
   async function deleteTransaction(id) {
     const tx = transactions.find((t) => t.id === id);
     if (!tx) return;
+    if (projectOfTransaction(tx, projects)) throw new Error(PROJECT_TX_MESSAGE);
     const batch = writeBatch(db);
     const amt = Number(tx.amount);
     if (tx.type === 'income' && tx.toAccount) {
@@ -187,6 +193,7 @@ export function DataProvider({ children }) {
   async function updateTransaction(id, newData) {
     const old = transactions.find((t) => t.id === id);
     if (!old) return;
+    if (projectOfTransaction(old, projects)) throw new Error(PROJECT_TX_MESSAGE);
     const batch = writeBatch(db);
     const oldAmt = Number(old.amount);
     if (old.type === 'income' && old.toAccount) {
