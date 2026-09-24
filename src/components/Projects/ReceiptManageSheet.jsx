@@ -86,6 +86,9 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
 
   const rules = correctionRules(project);
   const block = receiptBlock(project, receipt);
+  // The version of the project the owner is looking at; a correction is
+  // refused if the project has been written since.
+  const seenWriteId = project.lastWriteId ?? null;
   const targets = useMemo(() => moveTargets(project, receipt.id), [project, receipt.id]);
   const nameOf = (id) => accounts?.find((a) => a.id === id)?.name || null;
   const accountName = nameOf(receipt.accountId) || '—';
@@ -208,7 +211,7 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          run(() => onEdit({ amount: Number(amount), account, date: fromDateInput(date) }));
+          run(() => onEdit({ amount: Number(amount), account, date: fromDateInput(date), seenWriteId }));
         }}
       >
         {back}
@@ -265,7 +268,7 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          run(() => onMove(Number(startNo)));
+          run(() => onMove(Number(startNo), { seenWriteId }));
         }}
       >
         {back}
@@ -318,7 +321,7 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
       </div>
     );
     footer = (
-      <button type="button" className="btn-danger w-full" disabled={submitting} onClick={() => run(onCancel)}>
+      <button type="button" className="btn-danger w-full" disabled={submitting} onClick={() => run(() => onCancel({ seenWriteId }))}>
         {submitting ? 'Membatalkan…' : 'Ya, batalkan'}
       </button>
     );

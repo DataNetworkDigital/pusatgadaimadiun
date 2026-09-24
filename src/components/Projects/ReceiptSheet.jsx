@@ -81,6 +81,10 @@ function ReceiptForm({ onClose, project, accounts, defaultNo, onSubmit }) {
         date: fromDateInput(date),
         account,
         startNo: startNo ? Number(startNo) : null,
+        // The version of the project this form showed; the save refuses if
+        // the project has been written since (a re-tap before the screen
+        // caught up would otherwise pay the same tagihan again).
+        seenWriteId: project.lastWriteId ?? null,
       });
       onClose();
     } catch (err) {

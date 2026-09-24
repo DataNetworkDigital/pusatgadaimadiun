@@ -437,8 +437,8 @@ export default function ProjectDetail() {
         receiptId={managing}
         accounts={accounts}
         onEdit={(data) => updateReceipt(project.id, managing, data)}
-        onMove={(startNo) => moveReceipt(project.id, managing, startNo)}
-        onCancel={() => cancelReceipt(project.id, managing)}
+        onMove={(startNo, opts) => moveReceipt(project.id, managing, startNo, opts)}
+        onCancel={(opts) => cancelReceipt(project.id, managing, opts)}
       />
       <ReceiptSheet
         open={receiving !== null}
