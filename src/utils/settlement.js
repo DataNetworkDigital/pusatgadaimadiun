@@ -1,4 +1,4 @@
-import { isSettled, rowReceived, rowRemaining, rowState } from './paymentStatus';
+import { isSettled, rowCarriedIn, rowReceived, rowRemaining, rowState } from './paymentStatus';
 import { normalizeProject } from './normalizeProject';
 import { toDate } from './formatDate';
 
@@ -36,7 +36,17 @@ export function settlementSuggestion(project, today = new Date()) {
   const current = rows.find((r) => r.type === 'interest' && !isSettled(project, r)) || null;
   const laterDropped = rows.filter((r) => r !== current && !keptOnSettlement(project, r)).length;
   const finals = rows.filter((r) => r.type === 'final');
-  const principalPaid = finals.reduce((s, r) => s + rowReceived(project, r), 0);
+  // Money on a pelunasan pays a tunggakan carried onto it first (Gabung ke
+  // bulan depan); only the rest is modal coming back, and a tunggakan not yet
+  // paid is still owed on top of the modal.
+  const principalPaid = finals.reduce(
+    (s, r) => s + Math.max(0, rowReceived(project, r) - rowCarriedIn(project, r)),
+    0
+  );
+  const carriedOntoPelunasan = finals.reduce(
+    (s, r) => s + Math.max(0, rowCarriedIn(project, r) - rowReceived(project, r)),
+    0
+  );
 
   // The pelunasan has already come back in full: a project completed by its
   // payments and reopened by a correction, or a pelunasan paid before the last
@@ -65,9 +75,10 @@ export function settlementSuggestion(project, today = new Date()) {
   const currentInterest = current ? rowRemaining(project, current) : Math.max(0, principal - disbursed);
   const currentPaid = current ? rowReceived(project, current) : 0;
 
-  const shortfall = rows
-    .filter((r) => r !== current && r.type === 'interest' && rowState(project, r) === 'kurang' && isDue(r))
-    .reduce((s, r) => s + rowRemaining(project, r), 0);
+  const shortfall =
+    rows
+      .filter((r) => r !== current && r.type === 'interest' && rowState(project, r) === 'kurang' && isDue(r))
+      .reduce((s, r) => s + rowRemaining(project, r), 0) + carriedOntoPelunasan;
 
   return {
     disbursed,
@@ -90,16 +101,24 @@ export function settlementSuggestion(project, today = new Date()) {
 export function applySettlement(project, { amount, at, accountId, transactionId }) {
   const p = normalizeProject(project);
 
-  const kept = (p.payments || [])
-    .filter((row) => keptOnSettlement(p, row))
-    .map((row) => {
-      // A tagihan he had started paying is closed by the pelunasan, which is
-      // what the suggestion charged for. A row that already carries a closure
-      // (an old shortfall) keeps its own.
-      const left = rowRemaining(p, row);
-      if (left <= 0 || row.closure) return row;
-      return { ...row, closure: { kind: 'waive', amount: left, reason: 'settlement', at } };
-    });
+  const keptRows = (p.payments || []).filter((row) => keptOnSettlement(p, row));
+  const keptNos = new Set(keptRows.map((row) => row.no));
+  const kept = keptRows.map((row) => {
+    // A tunggakan carried onto a tagihan the pelunasan drops is paid by the
+    // pelunasan too (the suggestion charges it), so the pelunasan closes it.
+    // Left as a carry it would point at a row that is gone, and the
+    // pelunasan, numbered after the kept rows, could take that number and
+    // ask for the tunggakan again.
+    if (row.closure?.kind === 'carry' && !keptNos.has(row.closure.toNo)) {
+      return { ...row, closure: { kind: 'waive', amount: row.closure.amount, reason: 'settlement', at } };
+    }
+    // A tagihan he had started paying is closed by the pelunasan, which is
+    // what the suggestion charged for. A row that already carries a closure
+    // (an old shortfall) keeps its own.
+    const left = rowRemaining(p, row);
+    if (left <= 0 || row.closure) return row;
+    return { ...row, closure: { kind: 'waive', amount: left, reason: 'settlement', at } };
+  });
 
   const settleNo = kept.reduce((max, row) => Math.max(max, Number(row.no) || 0), 0) + 1;
 

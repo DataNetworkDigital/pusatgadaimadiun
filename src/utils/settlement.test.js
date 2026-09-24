@@ -215,3 +215,62 @@ describe('settlementSuggestion', () => {
     expect(settlementSuggestion(started, today).laterDropped).toBe(2);
   });
 });
+
+describe('settling after a tunggakan was carried', () => {
+  const today = new Date(2026, 9, 20);
+  const at = new Date(2026, 9, 20);
+  const carried = (project, no, toNo, amount) => ({
+    ...project,
+    payments: project.payments.map((r) => (r.no === no ? { ...r, closure: { kind: 'carry', amount, toNo } } : r)),
+  });
+  const settle = (p, amount) => {
+    const out = applySettlement(p, { amount, at, accountId: 'bca', transactionId: 'tx-s' });
+    return { ...p, payments: out.payments, receipts: out.receipts };
+  };
+
+  it('charges the carried month and closes it with the pelunasan when its target is dropped', () => {
+    // Bulan 1 paid, bulan 2 carried onto bulan 3, nothing else paid.
+    const p = carried(paid(base(), [{ no: 1, amount: 5_500_000 }]), 2, 3, 5_500_000);
+    const suggestion = settlementSuggestion(p, today);
+    expect(suggestion.amount).toBe(105_500_000);
+    const after = settle(p, suggestion.amount);
+    expect(after.payments.every((r) => isSettled(after, r))).toBe(true);
+    expect(after.payments.find((r) => r.no === 2).closure).toMatchObject({
+      kind: 'waive', reason: 'settlement', amount: 5_500_000,
+    });
+    expect(after.payments.some((r) => r.closure?.kind === 'carry')).toBe(false);
+  });
+
+  it('charges a tunggakan carried onto the pelunasan, and closes it with the settlement', () => {
+    // Bulan 1-2 paid, bulan 3 carried onto the pelunasan.
+    const p = carried(paid(base(), [{ no: 1, amount: 5_500_000 }, { no: 2, amount: 5_500_000 }]), 3, 4, 5_500_000);
+    const suggestion = settlementSuggestion(p, today);
+    expect(suggestion.amount).toBe(105_500_000);
+    expect(suggestion.shortfall).toBe(5_500_000);
+    const after = settle(p, suggestion.amount);
+    expect(after.payments.every((r) => isSettled(after, r))).toBe(true);
+  });
+
+  it('does not count money that paid the tunggakan as modal returned', () => {
+    // As above, and then 5,5jt arrived on the pelunasan: it paid the tunggakan.
+    const p0 = carried(paid(base(), [{ no: 1, amount: 5_500_000 }, { no: 2, amount: 5_500_000 }]), 3, 4, 5_500_000);
+    const p = {
+      ...p0,
+      receipts: [...p0.receipts, {
+        id: 'x', amount: 5_500_000, date: due(9), accountId: 'bca', transactionId: 'tx-x',
+        allocations: [{ no: 4, amount: 5_500_000 }],
+      }],
+    };
+    const suggestion = settlementSuggestion(p, today);
+    expect(suggestion.amount).toBe(100_000_000);
+    expect(suggestion.principalPaid).toBe(0);
+  });
+
+  it('keeps a carry whose target the pelunasan keeps', () => {
+    // Bulan 2 carried onto bulan 3, which was then partly paid.
+    const p0 = carried(paid(base(), [{ no: 1, amount: 5_500_000 }, { no: 3, amount: 2_000_000 }]), 2, 3, 5_500_000);
+    const after = settle(p0, settlementSuggestion(p0, today).amount);
+    expect(after.payments.find((r) => r.no === 2).closure.kind).toBe('carry');
+    expect(after.payments.every((r) => isSettled(after, r))).toBe(true);
+  });
+});
