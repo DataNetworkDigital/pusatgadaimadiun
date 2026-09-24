@@ -459,195 +459,187 @@ export function DataProvider({ children }) {
     return projectRef.id;
   }
 
-  async function updateProject(id, data) {
-    const project = projects.find((p) => p.id === id);
-    if (!project) throw new Error('Project tidak ditemukan');
-    const hasReceived = hasAnyReceipt(project);
-    // A new contract's modal is the remainder it carried over (spec 7.3): no
-    // account paid it out, so it cannot change or be given an account.
-    if (project.fundingMode === 'rollover') {
-      const modalChange =
-        data.disbursedAmount !== undefined && Number(data.disbursedAmount) !== project.disbursedAmount;
-      const accountChange =
-        data.sourceAccountId !== undefined && (data.sourceAccountId || null) !== (project.sourceAccountId || null);
-      if (modalChange || accountChange) {
-        throw new Error('Modal kontrak lanjutan dialihkan dari project lama dan tidak bisa diubah.');
-      }
-    }
-
-    const update = {};
-    // Text/metadata fields — always editable
-    if (data.name !== undefined) update.name = data.name;
-    if (data.ownerName !== undefined) update.ownerName = data.ownerName;
-    if (data.contractNumber !== undefined) update.contractNumber = data.contractNumber;
-    if (data.phone !== undefined) update.phone = data.phone;
-    if (data.nik !== undefined) update.nik = data.nik;
-    if (data.address !== undefined) update.address = data.address;
-    if (data.collateral !== undefined) update.collateral = data.collateral;
-    if (data.description !== undefined) update.description = data.description;
-    if (data.proofUrl !== undefined) update.proofUrl = data.proofUrl;
-    if (data.proofFileName !== undefined) update.proofFileName = data.proofFileName;
-
-    // Capital/funding-flow fields — only safe if no payments received
-    const sameDay = (a, b) => {
-      if (!a || !b) return a === b;
-      return a.getFullYear() === b.getFullYear() &&
-             a.getMonth() === b.getMonth() &&
-             a.getDate() === b.getDate();
-    };
-    const capitalChange =
-      (data.principalAmount !== undefined && Number(data.principalAmount) !== project.principalAmount) ||
-      (data.disbursedAmount !== undefined && Number(data.disbursedAmount) !== project.disbursedAmount) ||
-      (data.sourceAccountId !== undefined && data.sourceAccountId !== project.sourceAccountId) ||
-      (data.startDate !== undefined && (() => {
-        const newD = data.startDate instanceof Date ? data.startDate : data.startDate?.toDate?.();
-        const oldD = project.startDate?.toDate?.();
-        return !sameDay(newD, oldD);
-      })());
-    // A closed month (gabung, anggap lunas) keeps its own due date and amount
-    // through a schedule rebuild, so it pins the capital as money does.
-    const hasClosure = (project.payments || []).some((r) => r.closure);
-    if (capitalChange && (hasReceived || hasClosure)) {
-      throw new Error(
-        'Modal/rekening/tanggal mulai tidak bisa diubah karena sudah ada pembayaran masuk atau tagihan yang ditutup.'
-      );
-    }
-
-    // When the start date changes, the funding transaction must be re-dated too,
-    // otherwise it stays attributed to the wrong month (e.g. project input month).
-    let newFundingDate = null;
-
-    // Schedule-affecting fields
-    const scheduleChange =
-      data.monthlyReturnPct !== undefined ||
-      data.returnPctTier1 !== undefined ||
-      data.returnPctTier2 !== undefined ||
-      data.durationMonths !== undefined ||
-      data.paymentDayOfMonth !== undefined ||
-      data.principalAmount !== undefined ||
-      data.startDate !== undefined;
-
-    if (scheduleChange) {
-      const newPrincipal = data.principalAmount !== undefined ? Number(data.principalAmount) : project.principalAmount;
-      // Resolve tier rates, falling back to the project's existing values (and
-      // legacy flat monthlyReturnPct when tiers were never stored).
-      const curTier1 = project.returnPctTier1 != null ? project.returnPctTier1 : project.monthlyReturnPct;
-      const curTier2 = project.returnPctTier2 != null ? project.returnPctTier2 : curTier1;
-      const newTier1 = data.returnPctTier1 !== undefined
-        ? Number(data.returnPctTier1)
-        : (data.monthlyReturnPct !== undefined ? Number(data.monthlyReturnPct) : curTier1);
-      const newTier2 = data.returnPctTier2 !== undefined ? Number(data.returnPctTier2) : curTier2;
-      const newDuration = data.durationMonths !== undefined ? Number(data.durationMonths) : project.durationMonths;
-      const newDay = data.paymentDayOfMonth !== undefined ? Number(data.paymentDayOfMonth) : project.paymentDayOfMonth;
-      const newStart = data.startDate !== undefined
-        ? (data.startDate instanceof Date ? data.startDate : data.startDate.toDate())
-        : (project.startDate?.toDate?.() || new Date());
-      if (newDuration <= 0) throw new Error('Durasi project minimal 1 bulan');
-      if (newPrincipal <= 0) throw new Error('Nilai project harus lebih dari 0');
-      if (newDay < 1 || newDay > 31) throw new Error('Tanggal pembayaran harus 1-31');
-
-      // An extension's months, or a new contract's contract-day bagi hasil,
-      // would be lost if the schedule were rebuilt from the duration: those
-      // schedules only change through their own actions. The form still
-      // sends every field, so only a real change is refused.
-      const locked =
-        (project.extensions || []).length > 0 || (project.payments || []).some((r) => r.leadCharge);
-      if (locked) {
-        const curStart = project.startDate?.toDate?.() || null;
-        const curDay = Number(project.paymentDayOfMonth) || curStart?.getDate();
-        const unchanged =
-          newPrincipal === Number(project.principalAmount) &&
-          newTier1 === Number(curTier1) &&
-          newTier2 === Number(curTier2) &&
-          newDuration === Number(project.durationMonths) &&
-          newDay === curDay &&
-          sameDay(newStart, curStart);
-        if (!unchanged) {
-          throw new Error(
-            (project.extensions || []).length
-              ? 'Jadwal sudah diubah lewat Mundur/Perpanjang.'
-              : 'Jadwal kontrak lanjutan ini tidak bisa diubah lewat Edit Project.'
-          );
-        }
-      } else {
-        update.payments = recomputeUnpaidSchedule(project.payments || [], {
-          principalAmount: newPrincipal,
-          returnPctTier1: newTier1,
-          returnPctTier2: newTier2,
-          durationMonths: newDuration,
-          startDate: newStart,
-          paymentDayOfMonth: newDay,
-        });
-        if (data.principalAmount !== undefined) update.principalAmount = newPrincipal;
-        if (data.returnPctTier1 !== undefined || data.monthlyReturnPct !== undefined) {
-          update.returnPctTier1 = newTier1;
-          update.monthlyReturnPct = newTier1;
-        }
-        if (data.returnPctTier2 !== undefined) update.returnPctTier2 = newTier2;
-        if (data.durationMonths !== undefined) update.durationMonths = newDuration;
-        if (data.paymentDayOfMonth !== undefined) update.paymentDayOfMonth = newDay;
-        if (data.startDate !== undefined) {
-          update.startDate = Timestamp.fromDate(newStart);
-          newFundingDate = update.startDate;
+  async function updateProject(id, { seenWriteId, ...data } = {}) {
+    if (!projects.some((p) => p.id === id)) throw new Error('Project tidak ditemukan');
+    // Decided on a fresh read inside a transaction, like every other project
+    // write: an extension, a closure or money another device just recorded is
+    // seen here and never rebuilt over from an outdated screen, and a form
+    // that showed an older version is refused (seenWriteId).
+    const saved = await inProjectTransaction(id, (t, project, ref, writeId) => {
+      const hasReceived = hasAnyReceipt(project);
+      // A new contract's modal is the remainder it carried over (spec 7.3): no
+      // account paid it out, so it cannot change or be given an account.
+      if (project.fundingMode === 'rollover') {
+        const modalChange =
+          data.disbursedAmount !== undefined && Number(data.disbursedAmount) !== project.disbursedAmount;
+        const accountChange =
+          data.sourceAccountId !== undefined && (data.sourceAccountId || null) !== (project.sourceAccountId || null);
+        if (modalChange || accountChange) {
+          throw new Error('Modal kontrak lanjutan dialihkan dari project lama dan tidak bisa diubah.');
         }
       }
-    }
 
-    // disbursedAmount and sourceAccountId require batch with account balance adjustment
-    const needBatch =
-      (data.disbursedAmount !== undefined && Number(data.disbursedAmount) !== project.disbursedAmount) ||
-      (data.sourceAccountId !== undefined && data.sourceAccountId !== project.sourceAccountId);
+      const update = {};
+      // Text/metadata fields — always editable
+      if (data.name !== undefined) update.name = data.name;
+      if (data.ownerName !== undefined) update.ownerName = data.ownerName;
+      if (data.contractNumber !== undefined) update.contractNumber = data.contractNumber;
+      if (data.phone !== undefined) update.phone = data.phone;
+      if (data.nik !== undefined) update.nik = data.nik;
+      if (data.address !== undefined) update.address = data.address;
+      if (data.collateral !== undefined) update.collateral = data.collateral;
+      if (data.description !== undefined) update.description = data.description;
+      if (data.proofUrl !== undefined) update.proofUrl = data.proofUrl;
+      if (data.proofFileName !== undefined) update.proofFileName = data.proofFileName;
 
-    if (needBatch) {
-      const newDisbursed = data.disbursedAmount !== undefined ? Number(data.disbursedAmount) : project.disbursedAmount;
-      const newSourceId = data.sourceAccountId !== undefined ? data.sourceAccountId : project.sourceAccountId;
-      if (newDisbursed <= 0) throw new Error('Modal keluar harus lebih dari 0');
-      if (!newSourceId) throw new Error('Pilih rekening sumber');
-
-      const batch = writeBatch(db);
-      // Reverse old funding effect on old account
-      if (project.fundingTransactionId) {
-        batch.update(doc(db, C('accounts'), project.sourceAccountId), {
-          balance: increment(project.disbursedAmount || 0),
-          updatedAt: serverTimestamp(),
-        });
-        // Apply new funding effect on new account (could be same)
-        batch.update(doc(db, C('accounts'), newSourceId), {
-          balance: increment(-newDisbursed),
-          updatedAt: serverTimestamp(),
-        });
-        // Update funding transaction (re-date it too if the start date changed)
-        batch.update(doc(db, C('transactions'), project.fundingTransactionId), {
-          amount: newDisbursed,
-          fromAccount: newSourceId,
-          ...(newFundingDate ? { date: newFundingDate } : {}),
-        });
+      // Capital/funding-flow fields — only safe if no payments received
+      const sameDay = (a, b) => {
+        if (!a || !b) return a === b;
+        return a.getFullYear() === b.getFullYear() &&
+               a.getMonth() === b.getMonth() &&
+               a.getDate() === b.getDate();
+      };
+      const capitalChange =
+        (data.principalAmount !== undefined && Number(data.principalAmount) !== project.principalAmount) ||
+        (data.disbursedAmount !== undefined && Number(data.disbursedAmount) !== project.disbursedAmount) ||
+        (data.sourceAccountId !== undefined && data.sourceAccountId !== project.sourceAccountId) ||
+        (data.startDate !== undefined && (() => {
+          const newD = data.startDate instanceof Date ? data.startDate : data.startDate?.toDate?.();
+          const oldD = project.startDate?.toDate?.();
+          return !sameDay(newD, oldD);
+        })());
+      // A closed month (gabung, anggap lunas) keeps its own due date and amount
+      // through a schedule rebuild, so it pins the capital as money does.
+      const hasClosure = (project.payments || []).some((r) => r.closure);
+      if (capitalChange && (hasReceived || hasClosure)) {
+        throw new Error(
+          'Modal/rekening/tanggal mulai tidak bisa diubah karena sudah ada pembayaran masuk atau tagihan yang ditutup.'
+        );
       }
-      update.disbursedAmount = newDisbursed;
-      update.sourceAccountId = newSourceId;
-      // A new version, so a sheet another device opened before this edit
-      // refuses to save on top of it (seenWriteId).
-      update.lastWriteId = doc(collection(db, C('projects'))).id;
-      batch.update(doc(db, C('projects'), id), update);
-      await batch.commit();
-      toast('Project tersimpan');
-      return;
-    }
 
-    if (Object.keys(update).length === 0) return;
-    // A new version, so a sheet another device opened before this edit
-    // refuses to save on top of it (seenWriteId).
-    update.lastWriteId = doc(collection(db, C('projects'))).id;
-    if (newFundingDate && project.fundingTransactionId) {
-      // Keep the project doc and its funding transaction date in sync atomically.
-      const batch = writeBatch(db);
-      batch.update(doc(db, C('projects'), id), update);
-      batch.update(doc(db, C('transactions'), project.fundingTransactionId), { date: newFundingDate });
-      await batch.commit();
-    } else {
-      await updateDoc(doc(db, C('projects'), id), update);
-    }
-    toast('Project tersimpan');
+      // When the start date changes, the funding transaction must be re-dated too,
+      // otherwise it stays attributed to the wrong month (e.g. project input month).
+      let newFundingDate = null;
+
+      // Schedule-affecting fields
+      const scheduleChange =
+        data.monthlyReturnPct !== undefined ||
+        data.returnPctTier1 !== undefined ||
+        data.returnPctTier2 !== undefined ||
+        data.durationMonths !== undefined ||
+        data.paymentDayOfMonth !== undefined ||
+        data.principalAmount !== undefined ||
+        data.startDate !== undefined;
+
+      if (scheduleChange) {
+        const newPrincipal = data.principalAmount !== undefined ? Number(data.principalAmount) : project.principalAmount;
+        // Resolve tier rates, falling back to the project's existing values (and
+        // legacy flat monthlyReturnPct when tiers were never stored).
+        const curTier1 = project.returnPctTier1 != null ? project.returnPctTier1 : project.monthlyReturnPct;
+        const curTier2 = project.returnPctTier2 != null ? project.returnPctTier2 : curTier1;
+        const newTier1 = data.returnPctTier1 !== undefined
+          ? Number(data.returnPctTier1)
+          : (data.monthlyReturnPct !== undefined ? Number(data.monthlyReturnPct) : curTier1);
+        const newTier2 = data.returnPctTier2 !== undefined ? Number(data.returnPctTier2) : curTier2;
+        const newDuration = data.durationMonths !== undefined ? Number(data.durationMonths) : project.durationMonths;
+        const newDay = data.paymentDayOfMonth !== undefined ? Number(data.paymentDayOfMonth) : project.paymentDayOfMonth;
+        const newStart = data.startDate !== undefined
+          ? (data.startDate instanceof Date ? data.startDate : data.startDate.toDate())
+          : (project.startDate?.toDate?.() || new Date());
+        if (newDuration <= 0) throw new Error('Durasi project minimal 1 bulan');
+        if (newPrincipal <= 0) throw new Error('Nilai project harus lebih dari 0');
+        if (newDay < 1 || newDay > 31) throw new Error('Tanggal pembayaran harus 1-31');
+
+        // An extension's months, or a new contract's contract-day bagi hasil,
+        // would be lost if the schedule were rebuilt from the duration: those
+        // schedules only change through their own actions. The form still
+        // sends every field, so only a real change is refused.
+        const locked =
+          (project.extensions || []).length > 0 || (project.payments || []).some((r) => r.leadCharge);
+        if (locked) {
+          const curStart = project.startDate?.toDate?.() || null;
+          const curDay = Number(project.paymentDayOfMonth) || curStart?.getDate();
+          const unchanged =
+            newPrincipal === Number(project.principalAmount) &&
+            newTier1 === Number(curTier1) &&
+            newTier2 === Number(curTier2) &&
+            newDuration === Number(project.durationMonths) &&
+            newDay === curDay &&
+            sameDay(newStart, curStart);
+          if (!unchanged) {
+            throw new Error(
+              (project.extensions || []).length
+                ? 'Jadwal sudah diubah lewat Mundur/Perpanjang.'
+                : 'Jadwal kontrak lanjutan ini tidak bisa diubah lewat Edit Project.'
+            );
+          }
+        } else {
+          update.payments = recomputeUnpaidSchedule(project.payments || [], {
+            principalAmount: newPrincipal,
+            returnPctTier1: newTier1,
+            returnPctTier2: newTier2,
+            durationMonths: newDuration,
+            startDate: newStart,
+            paymentDayOfMonth: newDay,
+          });
+          if (data.principalAmount !== undefined) update.principalAmount = newPrincipal;
+          if (data.returnPctTier1 !== undefined || data.monthlyReturnPct !== undefined) {
+            update.returnPctTier1 = newTier1;
+            update.monthlyReturnPct = newTier1;
+          }
+          if (data.returnPctTier2 !== undefined) update.returnPctTier2 = newTier2;
+          if (data.durationMonths !== undefined) update.durationMonths = newDuration;
+          if (data.paymentDayOfMonth !== undefined) update.paymentDayOfMonth = newDay;
+          if (data.startDate !== undefined) {
+            update.startDate = Timestamp.fromDate(newStart);
+            newFundingDate = update.startDate;
+          }
+        }
+      }
+
+      // A changed modal or source account moves the balances as the funding
+      // transaction did: back into the old account, out of the new one.
+      const needBatch =
+        (data.disbursedAmount !== undefined && Number(data.disbursedAmount) !== project.disbursedAmount) ||
+        (data.sourceAccountId !== undefined && data.sourceAccountId !== project.sourceAccountId);
+
+      if (needBatch) {
+        const newDisbursed = data.disbursedAmount !== undefined ? Number(data.disbursedAmount) : project.disbursedAmount;
+        const newSourceId = data.sourceAccountId !== undefined ? data.sourceAccountId : project.sourceAccountId;
+        if (newDisbursed <= 0) throw new Error('Modal keluar harus lebih dari 0');
+        if (!newSourceId) throw new Error('Pilih rekening sumber');
+        if (project.fundingTransactionId) {
+          // One balance change per account, also when the account stays the same.
+          const deltas = new Map();
+          const move = (accountId, amount) => {
+            if (!accountId) return;
+            deltas.set(accountId, (deltas.get(accountId) || 0) + amount);
+          };
+          move(project.sourceAccountId, Number(project.disbursedAmount) || 0);
+          move(newSourceId, -newDisbursed);
+          for (const [accountId, amount] of deltas) {
+            if (amount === 0) continue;
+            t.update(doc(db, C('accounts'), accountId), { balance: increment(amount), updatedAt: serverTimestamp() });
+          }
+          // The funding transaction follows (re-dated too if the start date changed).
+          t.update(doc(db, C('transactions'), project.fundingTransactionId), {
+            amount: newDisbursed,
+            fromAccount: newSourceId,
+            ...(newFundingDate ? { date: newFundingDate } : {}),
+          });
+        }
+        update.disbursedAmount = newDisbursed;
+        update.sourceAccountId = newSourceId;
+      } else if (newFundingDate && project.fundingTransactionId) {
+        // Keep the funding transaction dated with the project.
+        t.update(doc(db, C('transactions'), project.fundingTransactionId), { date: newFundingDate });
+      }
+
+      if (Object.keys(update).length === 0) return false;
+      t.update(ref, { ...update, lastWriteId: writeId });
+      return true;
+    }, { seenWriteId });
+    if (saved) toast('Project tersimpan');
   }
 
   // Where money that comes in lands. `account` is either an account id or the
@@ -1122,6 +1114,11 @@ export function DataProvider({ children }) {
     const at = Timestamp.fromDate(startDate);
     const outcome = await inProjectTransaction(oldProjectId, (t, old, ref, writeId) => {
       const { update, amount } = applyRolloverClose(old, { newProjectId: newRef.id, at });
+      // The form was filled from the remainder it showed; if more arrived
+      // since, its numbers are stale.
+      if (data.disbursedAmount != null && Math.round(Number(data.disbursedAmount)) !== amount) {
+        throw new Error('Data project ini baru saja berubah. Periksa lagi, lalu simpan.');
+      }
       t.set(newRef, {
         name,
         ownerName: data.ownerName || null,

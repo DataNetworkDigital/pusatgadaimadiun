@@ -747,13 +747,18 @@ export default function ProjectDetail() {
           key={`rollover-${project.id}`}
           open={rollingOver}
           onClose={() => setRollingOver(false)}
-          onSubmit={async (data) => {
-            const newId = await rolloverProject(project.id, data, { seenWriteId: project.lastWriteId ?? null });
+          onSubmit={async ({ seenWriteId, ...data }) => {
+            const newId = await rolloverProject(project.id, data, { seenWriteId });
             setRollingOver(false);
             if (newId) navigate(`${base}/project/${newId}`);
           }}
           accounts={accounts}
-          rollover={{ from: project, amount: rollover.amount, startDate: rollover.startDate }}
+          rollover={{
+            from: project,
+            amount: rollover.amount,
+            startDate: rollover.startDate,
+            seenWriteId: project.lastWriteId ?? null,
+          }}
         />
       )}
       <ConfirmDialog

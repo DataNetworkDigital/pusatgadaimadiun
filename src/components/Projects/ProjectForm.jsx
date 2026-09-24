@@ -71,6 +71,9 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
   const [leadOn, setLeadOn] = useState(true);
   const [leadAmount, setLeadAmount] = useState(0);
   const [leadTouched, setLeadTouched] = useState(false);
+  // The version of the project this form shows (an edit) or starts from (a
+  // Kontrak baru); the save is refused if the project was written since.
+  const [seenWriteId, setSeenWriteId] = useState(null);
 
   useEffect(() => {
     if (open) {
@@ -97,6 +100,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
         setSourceAccountId(initial.sourceAccountId || accounts?.[0]?.id || '');
         setProofUrl(initial.proofUrl || '');
         setDisbursedTouched(true); // keep the saved disbursed value as-is
+        setSeenWriteId(initial.lastWriteId ?? null);
       } else if (rollover) {
         const src = rollover.from;
         const start = rollover.startDate || new Date();
@@ -123,6 +127,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
         setLeadOn(true);
         setLeadAmount(0);
         setLeadTouched(false);
+        setSeenWriteId(rollover.seenWriteId ?? null);
       } else {
         setName('');
         setOwnerName('');
@@ -222,6 +227,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
         proofUrl: proofUrl.trim() || null,
         proofFileName: null,
         ...(isRollover ? { firstMonthCharge: leadOn ? Number(leadValue) : 0 } : {}),
+        ...(isEdit || isRollover ? { seenWriteId } : {}),
       });
       onClose();
     } catch (e) {
