@@ -182,9 +182,12 @@ export function generateProjectSchedule({
 
 export function projectSummary(project) {
   const payments = project.payments || [];
+  const principal = Number(project.principalAmount) || 0;
   const expectedTotalReturn = payments.reduce((s, p) => {
     if (p.type === 'interest') return s + p.expectedAmount;
-    if (p.type === 'final') return s + (p.expectedAmount - (project.principalAmount || 0));
+    // A pelunasan returns its own base (the project value, or what an
+    // extension carried forward); only what it asks above that is return.
+    if (p.type === 'final') return s + (p.expectedAmount - (p.baseAmount ?? principal));
     return s;
   }, 0);
   const receivedSoFar = projectReceivedTotal(project);
@@ -192,11 +195,15 @@ export function projectSummary(project) {
   const paidCount = payments.filter((p) => isSettled(project, p)).length;
   const allPaid = paidCount === payments.length && payments.length > 0;
 
-  // Profit so far = receivedSoFar - principal contribution recovered
-  // For interest-only model, principal only returns at the final payment
-  // Net cash position: received - disbursed
+  // What went into a new contract came back as that contract's modal (spec
+  // 7.4): counted here so net stays true across a rollover chain.
+  const rolledOut = payments.reduce(
+    (s, p) => s + (p.closure?.kind === 'rollover' ? Number(p.closure.amount) || 0 : 0),
+    0
+  );
+  // Net position: received (and carried into a new contract) minus modal.
   const disbursed = Number(project.disbursedAmount) || 0;
-  const netCashChange = receivedSoFar - disbursed;
+  const netCashChange = receivedSoFar + rolledOut - disbursed;
 
   return {
     expectedTotalReturn,
@@ -205,6 +212,7 @@ export function projectSummary(project) {
     paidCount,
     totalCount: payments.length,
     allPaid,
+    rolledOut,
     netCashChange,
   };
 }
@@ -240,4 +248,10 @@ export function projectEndFromDuration(p) {
   const lastDay = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate();
   anchor.setDate(Math.min(day, lastDay));
   return anchor;
+}
+
+// When the project really ends: the last due date on the schedule once
+// Mundur or Perpanjang moved the pelunasan, the contract's own end otherwise.
+export function projectEnd(p) {
+  return (p?.extensions || []).length ? projectEndDate(p) : projectEndFromDuration(p);
 }

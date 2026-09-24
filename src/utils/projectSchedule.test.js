@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   projectEndFromDuration, projectEndDate, generateProjectSchedule, recomputeUnpaidSchedule,
+  projectSummary, projectEnd,
 } from './projectSchedule';
 
 describe('projectEndFromDuration', () => {
@@ -138,5 +139,51 @@ describe('recomputeUnpaidSchedule when money has already arrived', () => {
       r.no === 5 ? { ...r, closure: { kind: 'waive', amount: 5_500_000, reason: 'manual' } } : r
     );
     expect(() => recomputeUnpaidSchedule(rows, terms(4))).toThrow(/bulan 5 sudah dibayar atau ditutup/);
+  });
+});
+
+describe('projectSummary with extensions and rollovers', () => {
+  const extended = {
+    principalAmount: 100_000_000,
+    disbursedAmount: 94_500_000,
+    payments: [
+      { no: 1, type: 'interest', expectedAmount: 5_500_000 },
+      { no: 2, type: 'final', expectedAmount: 100_000_000, closure: { kind: 'extend', amount: 70_000_000 } },
+      { no: 3, type: 'interest', expectedAmount: 4_550_000, baseAmount: 70_000_000 },
+      { no: 4, type: 'final', expectedAmount: 70_000_000, baseAmount: 70_000_000 },
+    ],
+    receipts: [
+      { id: 'a', amount: 35_500_000, allocations: [{ no: 1, amount: 5_500_000 }, { no: 2, amount: 30_000_000 }] },
+    ],
+  };
+
+  it("counts a pelunasan's return against its own base", () => {
+    expect(projectSummary(extended).expectedTotalReturn).toBe(10_050_000);
+  });
+
+  it('counts what went into a new contract as having come back', () => {
+    const rolled = {
+      ...extended,
+      payments: [
+        extended.payments[0],
+        { ...extended.payments[1], closure: { kind: 'rollover', amount: 70_000_000, projectId: 'n' } },
+      ],
+    };
+    const s = projectSummary(rolled);
+    expect(s.rolledOut).toBe(70_000_000);
+    expect(s.netCashChange).toBe(35_500_000 + 70_000_000 - 94_500_000);
+    expect(s.expectedRemaining).toBe(0);
+    expect(projectSummary(extended).rolledOut).toBe(0);
+  });
+});
+
+describe('projectEnd', () => {
+  it('follows the schedule once an extension moved the pelunasan, the contract otherwise', () => {
+    const p = {
+      startDate: new Date(2026, 0, 10), durationMonths: 2, paymentDayOfMonth: 5, extensions: [{ id: 'e' }],
+      payments: [{ no: 1, dueDate: new Date(2026, 1, 5) }, { no: 2, dueDate: new Date(2026, 5, 5) }],
+    };
+    expect(projectEnd(p).toDateString()).toBe(new Date(2026, 5, 5).toDateString());
+    expect(projectEnd({ ...p, extensions: [] }).toDateString()).toBe(new Date(2026, 2, 5).toDateString());
   });
 });
