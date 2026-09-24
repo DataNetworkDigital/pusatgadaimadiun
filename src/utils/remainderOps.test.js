@@ -143,3 +143,11 @@ describe('applyReopenRemainder', () => {
     expect(() => applyReopenRemainder(extended, 4)).toThrow(/perpanjangan atau kontrak baru/);
   });
 });
+
+describe('reopening on a project carried into a new contract', () => {
+  it('is refused, so the old project cannot become active again', () => {
+    const p = stored([arrival('a', { 1: 5_000_000 })], { status: 'completed', rolledOverToProjectId: 'n1' });
+    p.payments[0] = { ...p.payments[0], closure: { kind: 'waive', amount: 500_000, reason: 'manual' } };
+    expect(() => applyReopenRemainder(p, 1)).toThrow(/kontrak baru/);
+  });
+});

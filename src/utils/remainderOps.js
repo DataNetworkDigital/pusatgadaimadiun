@@ -66,6 +66,11 @@ export function applyReopenRemainder(project, no) {
   if (p.settledEarly || p.status === 'default') {
     throw new Error('Project ini sudah ditutup, jadi sisanya tidak bisa dibuka lagi.');
   }
+  // Its pelunasan is the new contract's modal now; reopening a month would
+  // make it active again next to that contract.
+  if (p.rolledOverToProjectId) {
+    throw new Error('Project ini sudah dilanjutkan ke kontrak baru, jadi sisanya tidak bisa dibuka lagi.');
+  }
   const row = (p.payments || []).find((r) => r.no === no);
   if (!row) throw new Error('Tagihan tidak ditemukan');
   const c = row.closure;

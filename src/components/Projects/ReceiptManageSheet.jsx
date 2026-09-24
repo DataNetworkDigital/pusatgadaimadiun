@@ -103,6 +103,7 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
     firstRow?.closure?.kind === 'waive' &&
     firstRow.closure.reason === 'legacy' &&
     !project.settledEarly &&
+    !project.rolledOverToProjectId &&
     project.status !== 'default'
       ? Number(firstRow.closure.amount) || 0
       : 0;
