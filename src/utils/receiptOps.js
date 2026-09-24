@@ -1,4 +1,4 @@
-import { allocateReceipt } from './allocation';
+import { allocateReceipt, openRows } from './allocation';
 import { isSettled, rowRemaining } from './paymentStatus';
 import { formatCurrency } from './formatCurrency';
 import { normalizeProject } from './normalizeProject';
@@ -213,4 +213,49 @@ export function applyReceiptEdit(project, receiptId, { amount, at, accountId }) 
   });
 
   return { update: finish(p, payments, receipts, at), allocations };
+}
+
+/**
+ * The open tagihan this arrival could move to: as they would be without it,
+ * minus the one it starts at now. @returns [{ no, dueDate, remaining }]
+ */
+export function moveTargets(project, receiptId) {
+  const p = normalizeProject(project);
+  const receipt = (p.receipts || []).find((r) => r.id === receiptId);
+  if (!receipt) return [];
+  const firstNo = receipt.allocations?.[0]?.no;
+  const base = withoutReceipt(p, receipt);
+  return openRows(base)
+    .filter((r) => r.no !== firstNo)
+    .map((r) => ({ no: r.no, dueDate: r.dueDate, remaining: rowRemaining(base, r) }));
+}
+
+/**
+ * Move one arrival to another month ("salah bulan"): the same amount,
+ * re-allocated from `startNo`. No money moves between accounts.
+ * @returns {{ update, allocations }}
+ */
+export function applyReceiptMove(project, receiptId, startNo) {
+  const p = normalizeProject(project);
+  const receipt = findReceipt(p, receiptId);
+  guardCorrection(p, receipt, 'move');
+  if (startNo === receipt.allocations[0].no) {
+    throw new Error('Pembayaran ini sudah dimulai dari bulan itu. Pilih bulan lain.');
+  }
+  const amt = Math.round(Number(receipt.amount) || 0);
+  if (amt <= 0) throw new Error('Pembayaran Rp 0 tidak bisa dipindah.');
+
+  const base = withoutReceipt(p, receipt);
+  if (!openRows(base).some((r) => r.no === startNo)) {
+    throw new Error(`Tagihan bulan ${startNo} sudah lunas. Pilih bulan lain.`);
+  }
+  const { allocations, leftover } = allocateReceipt(base, amt, startNo);
+  if (leftover > 0) {
+    throw new Error(
+      `Mulai bulan ${startNo}, sisa tagihan kurang ${formatCurrency(leftover)} untuk menampung pembayaran ini.`
+    );
+  }
+  const moved = { ...receipt, allocations };
+  const receipts = (p.receipts || []).map((r) => (r.id === receipt.id ? moved : r));
+  return { update: finish(p, base.payments, receipts, receipt.date), allocations };
 }

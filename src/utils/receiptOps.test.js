@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { deriveRowFields, correctionRules, receiptBlock, applyReceiptCancel, applyReceiptEdit } from './receiptOps';
+import {
+  deriveRowFields, correctionRules, receiptBlock, applyReceiptCancel, applyReceiptEdit,
+  applyReceiptMove, moveTargets,
+} from './receiptOps';
 import { isSettled, rowRemaining, rowState, projectReceivedTotal } from './paymentStatus';
 import { normalizeProject } from './normalizeProject';
 
@@ -269,5 +272,65 @@ describe('applyReceiptEdit: project closed by pelunasan dipercepat', () => {
     const p = settled(3_000_000, { kind: 'waive', amount: 2_500_000, reason: 'settlement', at: due(8) });
     const out = edit(p, 'b', 5_500_000);
     expect(row(out, 2)).not.toHaveProperty('closure');
+  });
+});
+
+describe('applyReceiptMove', () => {
+  it('moves an arrival to the month it was really for', () => {
+    const p = stored([arrival('a', { 1: 5_500_000 }), arrival('b', { 2: 5_500_000 })]);
+    const out = applyReceiptMove(p, 'b', 3);
+    expect(out.allocations).toEqual([{ no: 3, amount: 5_500_000 }]);
+    expect(rowState(after(p, out), row(out, 2))).toBe('belum');
+    expect(isSettled(after(p, out), row(out, 3))).toBe(true);
+    expect(projectReceivedTotal(after(p, out))).toBe(11_000_000);
+    expect(out.update.receipts[0]).toEqual(p.receipts[0]);
+  });
+
+  it('spills forward from the new month the way new money does', () => {
+    const p = stored([arrival('a', { 1: 5_500_000, 2: 1_500_000 })]);
+    const out = applyReceiptMove(p, 'a', 2);
+    expect(out.allocations).toEqual([{ no: 2, amount: 5_500_000 }, { no: 3, amount: 1_500_000 }]);
+    expect(rowRemaining(after(p, out), row(out, 1))).toBe(5_500_000);
+  });
+
+  it('refuses a month that is already paid', () => {
+    const p = stored([arrival('a', { 1: 5_500_000 }), arrival('b', { 2: 5_500_000 })]);
+    expect(() => applyReceiptMove(p, 'b', 1)).toThrow('Tagihan bulan 1 sudah lunas. Pilih bulan lain.');
+  });
+
+  it('refuses the month it already starts from', () => {
+    const p = stored([arrival('b', { 2: 5_500_000 })]);
+    expect(() => applyReceiptMove(p, 'b', 2)).toThrow(/Pilih bulan lain/);
+  });
+
+  it('refuses a move the tagihan from that month on cannot hold', () => {
+    const p = stored([arrival('a', { 3: 5_500_000, 4: 95_500_000 })]);
+    expect(() => applyReceiptMove(p, 'a', 4)).toThrow(
+      'Mulai bulan 4, sisa tagihan kurang Rp 1.000.000 untuk menampung pembayaran ini.'
+    );
+  });
+
+  it('leaves the month an old payment was confirmed for open, with no waiver anywhere', () => {
+    const p = legacy({ 2: 5_000_000 });
+    const out = applyReceiptMove(p, 'legacy-2', 3);
+    expect(row(out, 2)).not.toHaveProperty('closure');
+    expect(rowState(after(p, out), row(out, 2))).toBe('belum');
+    expect(row(out, 3)).not.toHaveProperty('closure');
+    expect(rowRemaining(after(p, out), row(out, 3))).toBe(500_000);
+  });
+
+  it('is refused on a project closed by pelunasan dipercepat', () => {
+    const p = stored([arrival('a', { 1: 5_500_000 })], { status: 'completed', settledEarly: true });
+    expect(() => applyReceiptMove(p, 'a', 2)).toThrow(/pelunasan dipercepat/);
+  });
+});
+
+describe('moveTargets', () => {
+  it('lists the open tagihan as they would be without this arrival, minus where it starts now', () => {
+    const p = stored([arrival('a', { 1: 5_500_000 }), arrival('b', { 2: 5_500_000, 3: 1_500_000 })]);
+    expect(moveTargets(p, 'b')).toEqual([
+      { no: 3, dueDate: due(8), remaining: 5_500_000 },
+      { no: 4, dueDate: due(9), remaining: 100_000_000 },
+    ]);
   });
 });
