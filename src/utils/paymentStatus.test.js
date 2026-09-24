@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   rowReceived, rowWaived, rowDue, rowRemaining, rowState,
   isSettled, isOverdue, projectReceivedTotal, hasAnyReceipt,
-  isShort, receivedWithin,
+  isShort, receivedWithin, rowCarriedIn,
 } from './paymentStatus';
 import { generateProjectSchedule } from './projectSchedule';
 
@@ -338,5 +338,40 @@ describe('receivedWithin', () => {
   it('skips arrivals without a date', () => {
     const q = withReceipts([r3], [{ id: 'a', amount: 1_000_000, date: null, allocations: [{ no: 3, amount: 1_000_000 }] }]);
     expect(receivedWithin(q, () => true)).toEqual({ amount: 0, count: 0 });
+  });
+});
+
+describe('carry and the other closures', () => {
+  const two = () => [row({ no: 1 }), row({ no: 2, dueDate: new Date(2026, 10, 5) })];
+
+  it('moves a carried remainder off its own row and onto the target', () => {
+    const [r1, r2] = two();
+    r1.closure = { kind: 'carry', amount: 2_500_000, toNo: 2 };
+    const p = withReceipts([r1, r2], [{ id: 'a', amount: 3_000_000, allocations: [{ no: 1, amount: 3_000_000 }] }]);
+    expect(rowRemaining(p, r1)).toBe(0);
+    expect(isSettled(p, r1)).toBe(true);
+    expect(rowCarriedIn(p, r2)).toBe(2_500_000);
+    expect(rowRemaining(p, r2)).toBe(8_000_000);
+  });
+
+  it('treats a month carried whole as dealt with, and doubles the next one', () => {
+    const [r1, r2] = two();
+    r1.closure = { kind: 'carry', amount: 5_500_000, toNo: 2 };
+    const p = withReceipts([r1, r2], []);
+    expect(isSettled(p, r1)).toBe(true);
+    expect(rowState(p, r2)).toBe('belum');
+    expect(rowRemaining(p, r2)).toBe(11_000_000);
+  });
+
+  it('takes an extension or rollover closure off the row too', () => {
+    const e = row({ closure: { kind: 'extend', amount: 5_500_000, extensionId: 'x' } });
+    expect(rowRemaining(withReceipts([e], []), e)).toBe(0);
+    const r = row({ closure: { kind: 'rollover', amount: 5_500_000, projectId: 'p2' } });
+    expect(rowRemaining(withReceipts([r], []), r)).toBe(0);
+  });
+
+  it('keeps rowWaived meaning forgiveness only', () => {
+    expect(rowWaived(row({ closure: { kind: 'carry', amount: 1, toNo: 2 } }))).toBe(0);
+    expect(rowWaived(row({ closure: { kind: 'waive', amount: 7, reason: 'manual' } }))).toBe(7);
   });
 });

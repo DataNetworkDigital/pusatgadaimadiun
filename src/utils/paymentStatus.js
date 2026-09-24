@@ -50,12 +50,35 @@ export function rowReceived(project, row) {
   return Number(row.receivedAmount) || 0;
 }
 
-// Only a 'waive' closure reduces what is owed on this row. Other closure kinds
-// (carry, extend, rollover) move the remainder somewhere else and are handled
-// by the stages that introduce them.
+// Forgiveness only: a 'waive' closure. Carry, extend and rollover move the
+// remainder somewhere else instead; rowRemaining counts all of them through
+// rowClosed, and this one stays for code that must tell forgiveness apart.
 export function rowWaived(row) {
   const c = row?.closure;
   return c && c.kind === 'waive' ? Number(c.amount) || 0 : 0;
+}
+
+const CLOSING_KINDS = new Set(['waive', 'carry', 'extend', 'rollover']);
+
+// The part of this row's remainder a closure dealt with without money:
+// forgiven (waive), moved onto a later tagihan (carry), into an extension
+// (extend) or into a new contract (rollover). Whatever the kind, it is no
+// longer owed on this row.
+export function rowClosed(row) {
+  const c = row?.closure;
+  if (!c || !CLOSING_KINDS.has(c.kind)) return 0;
+  return Number(c.amount) || 0;
+}
+
+// What earlier tagihan carried onto this one ("Gabung sisa ke bulan depan"):
+// the target of a carry asks for its own tagihan plus these.
+export function rowCarriedIn(project, row) {
+  let sum = 0;
+  for (const other of project?.payments || []) {
+    const c = other?.closure;
+    if (c?.kind === 'carry' && c.toNo === row?.no) sum += Number(c.amount) || 0;
+  }
+  return sum;
 }
 
 // A row with an unknown or zero due still reports a remaining of 0 here,
@@ -65,7 +88,10 @@ export function rowWaived(row) {
 // reporting none. Do not "fix" this into a guessed amount -- isSettled
 // below does not read this 0 as "nothing owed" on its own; see hasActivity.
 export function rowRemaining(project, row) {
-  return Math.max(0, rowDue(row) - rowReceived(project, row) - rowWaived(row));
+  return Math.max(
+    0,
+    rowDue(row) + rowCarriedIn(project, row) - rowReceived(project, row) - rowClosed(row)
+  );
 }
 
 // True when something has actually happened to this row, as opposed to a
@@ -81,7 +107,7 @@ function hasActivity(project, row) {
   const touched = receipts
     ? receipts.some((r) => (Array.isArray(r?.allocations) ? r.allocations : []).some((a) => a?.no === row?.no))
     : row?.receivedAmount != null;
-  return touched || rowWaived(row) > 0;
+  return touched || rowClosed(row) > 0;
 }
 
 // Settled means the remainder is zero AND something actually happened to
