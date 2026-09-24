@@ -833,6 +833,7 @@ export function DataProvider({ children }) {
       const tx = txSnap?.exists() ? txSnap.data() : null;
       if (
         !tx ||
+        tx.type !== 'income' ||
         (Number(tx.amount) || 0) !== (Number(receipt.amount) || 0) ||
         (tx.toAccount || null) !== (receipt.accountId || null)
       ) {

@@ -101,6 +101,7 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
   const txChanged =
     !loading &&
     (!tx ||
+      tx.type !== 'income' ||
       (Number(tx.amount) || 0) !== (Number(receipt.amount) || 0) ||
       (tx.toAccount || null) !== (receipt.accountId || null));
   const notes = [block, txChanged && TX_CHANGED, rules.why].filter(Boolean);
