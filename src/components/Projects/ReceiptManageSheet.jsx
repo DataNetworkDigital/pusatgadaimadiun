@@ -336,7 +336,7 @@ function ManageForm({ onClose, project, receipt, accounts, onEdit, onMove, onCan
         <p className="text-ink-soft text-[14px] leading-relaxed">
           Pembayaran bulan {firstNo} dicatat {formatCurrency(receipt.amount)} sebelum ada fitur cicilan, dan
           kekurangan {formatCurrency(legacyGap)} dianggap lunas. Kalau memang masih kurang, kekurangan itu ditagih lagi
-          di bulan {firstNo}.
+          di bulan {firstNo}.{project.status === 'completed' ? ' Project ini aktif lagi.' : ''}
         </p>
         {errorLine}
       </div>

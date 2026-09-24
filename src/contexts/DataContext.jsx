@@ -739,7 +739,7 @@ export function DataProvider({ children }) {
 
     // Made before the transaction so a rerun can recognise its own receipt.
     const txRef = doc(collection(db, C('transactions')));
-    const count = await inProjectTransaction(projectId, (t, project, ref, writeId) => {
+    const outcome = await inProjectTransaction(projectId, (t, project, ref, writeId) => {
       // Checked on the fresh read: another device may have closed it.
       if (project.status !== 'active') throw new Error('Project ini sudah ditutup. Pembayaran tidak dicatat.');
       if (startNo != null && !openRows(project).some((r) => r.no === startNo)) {
@@ -810,9 +810,11 @@ export function DataProvider({ children }) {
         update.closedAt = Timestamp.fromDate(recvDate);
       }
       t.update(ref, update);
-      return allocations.length;
+      return { count: allocations.length, completed: update.status === 'completed' };
     }, { alreadyDone: (p) => (p.receipts || []).some((r) => r.id === txRef.id), seenWriteId });
-    toast(count > 1 ? `Pembayaran tercatat untuk ${count} tagihan` : 'Pembayaran tercatat');
+    const count = outcome?.count ?? 1;
+    const base = count > 1 ? `Pembayaran tercatat untuk ${count} tagihan` : 'Pembayaran tercatat';
+    toast(outcome?.completed ? `${base}, project selesai` : base);
   }
 
   // ===== Corrections to one arrival of money =====

@@ -17,6 +17,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { projectSummary } from '../../utils/projectSchedule';
 import { isSettled, isShort, rowCarriedIn, rowDue, rowReceived, rowRemaining, rowState } from '../../utils/paymentStatus';
+import { applyReopenRemainder } from '../../utils/remainderOps';
 import {
   IcChevronLeft,
   IcCalendar,
@@ -235,13 +236,21 @@ function PaymentRow({
 }
 
 // What reopening bulan `no` does, in the owner's words.
+// What reopening does, or why it cannot be done yet, before the owner taps.
 function reopenMessage(project, no) {
   const c = (project?.payments || []).find((r) => r.no === no)?.closure;
   if (!c) return '';
-  if (c.kind === 'carry') {
-    return `Sisa ${formatCurrency(c.amount)} kembali ditagih di bulan ${no}, dan tunggakan di bulan ${c.toNo} dihapus.`;
+  let update;
+  try {
+    ({ update } = applyReopenRemainder(project, no));
+  } catch (e) {
+    return `Belum bisa dibuka. ${e.message}`;
   }
-  return `Sisa ${formatCurrency(c.amount)} kembali ditagih di bulan ${no}.`;
+  const active = update.status === 'active' ? ' Project ini aktif lagi.' : '';
+  if (c.kind === 'carry') {
+    return `Sisa ${formatCurrency(c.amount)} kembali ditagih di bulan ${no}, dan tunggakan di bulan ${c.toNo} dihapus.${active}`;
+  }
+  return `Sisa ${formatCurrency(c.amount)} kembali ditagih di bulan ${no}.${active}`;
 }
 
 export default function ProjectDetail() {
