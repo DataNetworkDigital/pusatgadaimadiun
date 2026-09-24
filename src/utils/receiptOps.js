@@ -39,8 +39,9 @@ import { toDate } from './formatDate';
  * recomputed, never a partial array.
  */
 
-// Confirmed under the old rule and still where it was confirmed.
-const isLegacy = (receipt) => String(receipt?.id ?? '').startsWith('legacy-') && !receipt?.moved;
+// Confirmed under the old rule and still where, and as, it was confirmed.
+const isLegacy = (receipt) =>
+  String(receipt?.id ?? '').startsWith('legacy-') && !receipt?.moved && !receipt?.reopened;
 const time = (value) => toDate(value)?.getTime() ?? 0;
 const nosOf = (receipt) => new Set((receipt?.allocations || []).map((a) => a.no));
 

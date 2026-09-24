@@ -5,6 +5,7 @@ import {
 } from './receiptOps';
 import { isSettled, rowRemaining, rowState, projectReceivedTotal } from './paymentStatus';
 import { normalizeProject } from './normalizeProject';
+import { applyReopenRemainder } from './remainderOps';
 
 const due = (month) => new Date(2026, month, 5);
 
@@ -370,5 +371,15 @@ describe('applyReceiptEdit: an old payment stays on the tagihan it was confirmed
     const out = edit(p2, 'legacy-2', 4_000_000);
     expect(row(out, 3)).not.toHaveProperty('closure');
     expect(rowRemaining(after(p2, out), row(out, 3))).toBe(1_500_000);
+  });
+});
+
+describe('applyReceiptEdit: an old shortfall the owner reopened', () => {
+  it('follows the new rules, so a correction does not forgive the gap again', () => {
+    const p = legacy({ 2: 5_000_000 });
+    const p2 = after(p, applyReopenRemainder(p, 2));
+    const out = edit(p2, 'legacy-2', 4_500_000);
+    expect(row(out, 2)).not.toHaveProperty('closure');
+    expect(rowRemaining(after(p2, out), row(out, 2))).toBe(1_000_000);
   });
 });
