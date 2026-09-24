@@ -87,6 +87,12 @@ describe('correctionRules', () => {
   it('allows nothing on a macet project', () => {
     expect(correctionRules({ status: 'default' })).toMatchObject({ edit: false, move: false, cancel: false });
   });
+
+  it('allows no correction on a project carried into a new contract, and says why', () => {
+    const rules = correctionRules({ status: 'completed', rolledOverToProjectId: 'n' });
+    expect(rules).toMatchObject({ edit: false, move: false, cancel: false });
+    expect(rules.why).toMatch(/kontrak baru/);
+  });
 });
 
 describe('receiptBlock', () => {
@@ -381,5 +387,16 @@ describe('applyReceiptEdit: an old shortfall the owner reopened', () => {
     const out = edit(p2, 'legacy-2', 4_500_000);
     expect(row(out, 2)).not.toHaveProperty('closure');
     expect(rowRemaining(after(p2, out), row(out, 2))).toBe(1_000_000);
+  });
+});
+
+describe('receiptBlock names an extension', () => {
+  it('asks for the extension to be undone first', () => {
+    const p = {
+      status: 'active',
+      payments: [{ no: 4, type: 'final', expectedAmount: 100, closure: { kind: 'extend', amount: 70, extensionId: 'e' } }],
+      receipts: [{ id: 'r', amount: 30, allocations: [{ no: 4, amount: 30 }] }],
+    };
+    expect(receiptBlock(p, p.receipts[0])).toMatch(/Batalkan dulu perpanjangannya/);
   });
 });

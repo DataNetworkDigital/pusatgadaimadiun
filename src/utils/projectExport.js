@@ -3,7 +3,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatCurrency } from './formatCurrency';
 import { formatDate, MONTHS, toDate } from './formatDate';
-import { projectSummary, projectEndFromDuration } from './projectSchedule';
+import { projectSummary, projectEnd } from './projectSchedule';
 import { isSettled, isShort, receiptsWithin, receivedWithin, rowRemaining, rowReceived } from './paymentStatus';
 import { PROJECT_COLUMNS, COLLECTION_COLUMNS, pickColumns, cellValue, cellText, pdfLayout } from './exportColumns';
 
@@ -26,6 +26,8 @@ function sheetColWidths(picked) {
 function paymentStatusLabel(p, pay, paidLabel) {
   const c = pay.closure;
   if (c?.kind === 'carry') return `Digabung ke bln ${c.toNo}`;
+  if (c?.kind === 'extend') return 'Diperpanjang';
+  if (c?.kind === 'rollover') return 'Kontrak baru';
   if (isSettled(p, pay)) return c?.kind === 'waive' && c.reason !== 'legacy' ? 'Dianggap lunas' : paidLabel;
   if (rowReceived(p, pay) > 0) return isShort(p, pay) ? 'Kurang' : 'Sebagian';
   return 'Belum';
@@ -200,7 +202,7 @@ export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = n
   if (includeArchive) table('Riwayat Project', archive, [184, 84, 80], 'Tidak ada riwayat project');
 
   // Summary footer
-  const totalDisbursed = sourceList.reduce((s, p) => s + (p.disbursedAmount || 0), 0);
+  const totalDisbursed = cashDisbursedTotal(sourceList);
   let totalReceived = sourceList.reduce((s, p) => s + projectSummary(p).receivedSoFar, 0);
   if (filter) {
     // Per arrival, on the day it arrived; see receivedWithin.
@@ -228,17 +230,29 @@ export function exportProjectsToPdf(projects, accounts, mode = 'all', filter = n
 // One row per scheduled payment whose DUE DATE falls in the range (all
 // statuses), so the collector knows who / when / where to collect.
 
+const MOVED_ON = new Set(['carry', 'extend', 'rollover']);
+
+// Cash that left the accounts to fund projects. A new contract's modal was
+// carried over from the old project, not paid out again (spec 7.4).
+export function cashDisbursedTotal(list) {
+  return list
+    .filter((p) => p.fundingMode !== 'rollover')
+    .reduce((s, p) => s + (Number(p.disbursedAmount) || 0), 0);
+}
+
 export function collectionRows(projects, filter) {
   const rows = [];
   projects.forEach((p) => {
     const startStr = p.startDate ? formatDate(p.startDate) : '';
-    const end = projectEndFromDuration(p);
+    const end = projectEnd(p);
     const endStr = end ? formatDate(end) : '';
     const durasi = Number(p.durationMonths) || 0;
     (p.payments || []).forEach((pay) => {
       if (!pay.dueDate) return;
-      // A carried month is asked for on the month it moved to.
-      if (pay.closure?.kind === 'carry') return;
+      // A carried month is asked for on the month it moved to; an extended
+      // pelunasan on the extension's months; a rolled-over one in the new
+      // contract.
+      if (MOVED_ON.has(pay.closure?.kind)) return;
       if (filter && !inDateRange(pay.dueDate, filter)) return;
       const paid = isSettled(p, pay);
       rows.push({

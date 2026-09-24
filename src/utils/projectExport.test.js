@@ -3,7 +3,7 @@ import { PROJECT_COLUMNS, COLLECTION_COLUMNS, defaultKeys, pickColumns, pdfLayou
 import { formatCurrency } from './formatCurrency';
 import {
   projectSheetRows, projectsToPdfRows, emptyPdfRow, projectsTouchedByFilter, scheduleSheetRows,
-  collectionRows, collectionTotals,
+  collectionRows, collectionTotals, cashDisbursedTotal,
 } from './projectExport';
 
 // Two projects: one active with every relevant field present, one completed
@@ -261,5 +261,55 @@ describe('Daftar Tagihan totals', () => {
       ['Dianggap lunas', true], ['Kurang', false], ['Belum', false],
     ]);
     expect(collectionTotals(rows)).toEqual({ outstanding: 4_500_000 + 5_500_000, all: 3_000_000 + 4_500_000 + 5_500_000 });
+  });
+});
+
+describe('extensions and new contracts in the exports', () => {
+  const on = (m) => new Date(2026, m, 5);
+  const extended = {
+    id: 'x', name: 'Kebun', status: 'active', startDate: on(0), durationMonths: 2, paymentDayOfMonth: 5,
+    principalAmount: 100_000_000, disbursedAmount: 94_500_000, extensions: [{ id: 'e1', kind: 'sisa' }],
+    payments: [
+      { no: 1, type: 'interest', expectedAmount: 5_500_000, dueDate: on(1) },
+      { no: 2, type: 'final', expectedAmount: 100_000_000, dueDate: on(2), closure: { kind: 'extend', amount: 70_000_000, extensionId: 'e1' } },
+      { no: 3, type: 'interest', expectedAmount: 4_550_000, dueDate: on(3), baseAmount: 70_000_000, extensionId: 'e1' },
+      { no: 4, type: 'final', expectedAmount: 70_000_000, dueDate: on(4), baseAmount: 70_000_000, extensionId: 'e1' },
+    ],
+    receipts: [
+      { id: 'a', amount: 35_500_000, date: on(2), accountId: 'bca', allocations: [{ no: 1, amount: 5_500_000 }, { no: 2, amount: 30_000_000 }] },
+    ],
+  };
+  const rolledOld = {
+    ...extended, id: 'o', name: 'Lama', status: 'completed', extensions: [], rolledOverToProjectId: 'n',
+    payments: [
+      extended.payments[0],
+      { ...extended.payments[1], closure: { kind: 'rollover', amount: 70_000_000, projectId: 'n' } },
+    ],
+  };
+  const rolledNew = {
+    id: 'n', name: 'Lama (lanjutan)', status: 'active', fundingMode: 'rollover', startDate: on(2), durationMonths: 3,
+    paymentDayOfMonth: 5, principalAmount: 70_000_000, disbursedAmount: 70_000_000, payments: [], receipts: [],
+  };
+
+  it('leaves an extended or rolled-over pelunasan out of the Daftar Tagihan', () => {
+    const rows = collectionRows([extended, rolledOld], null);
+    expect(rows.map((r) => `${r.project} ${r.dueStr} ${r.jenis}`)).toEqual([
+      'Kebun 05/02/2026 Cicilan',
+      'Lama 05/02/2026 Cicilan',
+      'Kebun 05/04/2026 Cicilan',
+      'Kebun 05/05/2026 Pelunasan',
+    ]);
+    expect(rows.find((r) => r.project === 'Kebun').endStr).toBe('05/05/2026');
+  });
+
+  it('says how the pelunasan ended on the Jadwal sheet', () => {
+    const lines = scheduleSheetRows([extended, rolledOld], () => 'BCA', null);
+    const status = (name, no) => lines.find((l) => l.Project === name && l['No. Pembayaran'] === no)?.Status;
+    expect(status('Kebun', 2)).toBe('Diperpanjang');
+    expect(status('Lama', 2)).toBe('Kontrak baru');
+  });
+
+  it('counts only cash in Total Modal Keluar', () => {
+    expect(cashDisbursedTotal([extended, rolledOld, rolledNew])).toBe(189_000_000);
   });
 });

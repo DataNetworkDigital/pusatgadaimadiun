@@ -274,3 +274,14 @@ describe('Kurang Bayar column', () => {
     expect(col.value(p, {})).toBe(600);
   });
 });
+
+describe('end date after an extension', () => {
+  it('shows the pelunasan the schedule now ends with', () => {
+    const p = {
+      startDate: new Date(2026, 0, 10), durationMonths: 2, paymentDayOfMonth: 5, extensions: [{ id: 'e' }],
+      payments: [{ no: 1, dueDate: new Date(2026, 1, 5) }, { no: 2, dueDate: new Date(2026, 5, 5) }],
+    };
+    const col = PROJECT_COLUMNS.find((c) => c.key === 'endDate');
+    expect(cellText(col, p, { index: 0 })).toBe('05/06/2026');
+  });
+});

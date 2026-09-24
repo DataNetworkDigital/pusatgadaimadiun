@@ -59,6 +59,14 @@ export function correctionRules(project) {
   if (project?.status === 'default') {
     return { edit: false, move: false, cancel: false, why: 'Project macet: pembayarannya tidak bisa diubah.' };
   }
+  if (project?.rolledOverToProjectId) {
+    return {
+      edit: false,
+      move: false,
+      cancel: false,
+      why: 'Project ini sudah dilanjutkan ke kontrak baru. Sisa pelunasannya sekarang modal kontrak baru, jadi pembayarannya tidak bisa diubah.',
+    };
+  }
   if (project?.settledEarly) {
     return {
       edit: true,
@@ -72,18 +80,20 @@ export function correctionRules(project) {
 
 /**
  * A tagihan this receipt paid that was closed some other way (gabung, anggap
- * lunas, perpanjangan: later stages) blocks correcting the receipt until that
- * closure is reopened, or the stored closure amount would go stale and could
- * silently forgive or double-count money. Returns the message, or null.
+ * lunas, perpanjangan) blocks correcting the receipt until that closure is
+ * undone, or the stored closure amount would go stale and could silently
+ * forgive or double-count money. Returns the message, or null.
  */
 export function receiptBlock(project, receipt) {
   const nos = nosOf(receipt);
   const blocked = (project?.payments || []).find(
     (row) => nos.has(row.no) && row.closure && !ownedBy(project, receipt, row.closure)
   );
-  return blocked
-    ? `Tagihan bulan ${blocked.no} sudah ditutup dengan cara lain. Buka dulu penutupnya sebelum mengubah pembayaran ini.`
-    : null;
+  if (!blocked) return null;
+  if (blocked.closure.kind === 'extend') {
+    return `Pelunasan bulan ${blocked.no} sudah diperpanjang. Batalkan dulu perpanjangannya sebelum mengubah pembayaran ini.`;
+  }
+  return `Tagihan bulan ${blocked.no} sudah ditutup dengan cara lain. Buka dulu penutupnya sebelum mengubah pembayaran ini.`;
 }
 
 /**

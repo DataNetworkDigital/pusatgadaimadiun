@@ -3,7 +3,7 @@ import { formatDate } from './formatDate';
 import {
   projectSummary,
   findNextDuePayment,
-  projectEndFromDuration,
+  projectEnd,
   resolveTiers,
 } from './projectSchedule';
 import { isShort, rowRemaining } from './paymentStatus';
@@ -59,7 +59,7 @@ export const PROJECT_COLUMNS = [
   { key: 'startDate', label: 'Tanggal Mulai', defaultOn: true, width: 20,
     value: (p) => (p.startDate ? formatDate(p.startDate) : '') },
   { key: 'endDate', label: 'Tanggal Berakhir', defaultOn: true, width: 20,
-    value: (p) => { const d = projectEndFromDuration(p); return d ? formatDate(d) : ''; } },
+    value: (p) => { const d = projectEnd(p); return d ? formatDate(d) : ''; } },
   { key: 'nextDue', label: 'Jatuh Tempo Berikutnya', defaultOn: true, width: 24,
     value: (p) => { const n = findNextDuePayment(p); return n ? formatDate(n.dueDate) : ''; } },
   { key: 'duration', label: 'Durasi (bulan)', defaultOn: true, width: 14, align: 'right',
