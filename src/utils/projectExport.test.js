@@ -3,7 +3,7 @@ import { PROJECT_COLUMNS, COLLECTION_COLUMNS, defaultKeys, pickColumns, pdfLayou
 import { formatCurrency } from './formatCurrency';
 import {
   projectSheetRows, projectsToPdfRows, emptyPdfRow, projectsTouchedByFilter, scheduleSheetRows,
-  collectionRows,
+  collectionRows, collectionTotals,
 } from './projectExport';
 
 // Two projects: one active with every relevant field present, one completed
@@ -237,5 +237,29 @@ describe('closed remainders in the exports', () => {
     const lines = scheduleSheetRows([project], () => 'BCA', null);
     expect(lines[0].Status).toBe('Digabung ke bln 2');
     expect(lines[2].Status).toBe('Dianggap lunas');
+  });
+});
+
+describe('Daftar Tagihan totals', () => {
+  const on = (m) => new Date(2026, m, 5);
+  const project = {
+    id: 'p', name: 'Toko', status: 'active',
+    payments: [
+      { no: 1, type: 'interest', expectedAmount: 5_500_000, dueDate: on(6), closure: { kind: 'waive', amount: 2_500_000, reason: 'manual' } },
+      { no: 2, type: 'interest', expectedAmount: 5_500_000, dueDate: on(7) },
+      { no: 3, type: 'interest', expectedAmount: 5_500_000, dueDate: on(8) },
+    ],
+    receipts: [
+      { id: 'a', amount: 3_000_000, date: on(6), accountId: 'bca', allocations: [{ no: 1, amount: 3_000_000 }] },
+      { id: 'b', amount: 1_000_000, date: on(7), accountId: 'bca', allocations: [{ no: 2, amount: 1_000_000 }] },
+    ],
+  };
+
+  it('counts a forgiven month as settled, not as still owed', () => {
+    const rows = collectionRows([project], null);
+    expect(rows.map((r) => [r.status, r.paid])).toEqual([
+      ['Dianggap lunas', true], ['Kurang', false], ['Belum', false],
+    ]);
+    expect(collectionTotals(rows)).toEqual({ outstanding: 4_500_000 + 5_500_000, all: 3_000_000 + 4_500_000 + 5_500_000 });
   });
 });

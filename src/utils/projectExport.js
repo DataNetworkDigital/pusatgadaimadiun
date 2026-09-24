@@ -255,6 +255,9 @@ export function collectionRows(projects, filter) {
         dueStr: formatDate(pay.dueDate),
         jenis: pay.type === 'final' ? 'Pelunasan' : 'Cicilan',
         amount: paid ? rowReceived(p, pay) : rowRemaining(p, pay),
+        // Settled however it ended (paid, forgiven, closed by a pelunasan);
+        // the status wording alone cannot tell the PDF what is still owed.
+        paid,
         status: paymentStatusLabel(p, pay, 'Lunas'),
         paidStr: pay.receivedDate ? formatDate(pay.receivedDate) : '',
       });
@@ -262,6 +265,15 @@ export function collectionRows(projects, filter) {
   });
   rows.sort((a, b) => (a.due?.getTime() || 0) - (b.due?.getTime() || 0));
   return rows;
+}
+
+// What the collector still has to go get (every tagihan not settled, 'Kurang'
+// ones included: they owe their remainder), and the whole list.
+export function collectionTotals(rows) {
+  return {
+    outstanding: rows.filter((r) => !r.paid).reduce((s, r) => s + r.amount, 0),
+    all: rows.reduce((s, r) => s + r.amount, 0),
+  };
 }
 
 export function exportCollectionToExcel(projects, accounts, filter = null, columnKeys = null) {
@@ -315,18 +327,13 @@ export function exportCollectionToPdf(projects, accounts, filter = null, columnK
       const r = rows[data.row.index];
       // Still-outstanding rows (nothing arrived, or only part of it) both get
       // the highlight -- 'Kurang' owes just as much attention as 'Belum'.
-      if (data.section === 'body' && r && r.status !== 'Lunas') {
+      if (data.section === 'body' && r && !r.paid) {
         data.cell.styles.fillColor = [250, 240, 235];
       }
     },
   });
 
-  // 'Kurang' rows still owe their remainder -- excluding them here would
-  // silently undercount what the collector actually needs to go get.
-  const totalOutstanding = rows
-    .filter((r) => r.status !== 'Lunas')
-    .reduce((s, r) => s + r.amount, 0);
-  const totalAll = rows.reduce((s, r) => s + r.amount, 0);
+  const { outstanding: totalOutstanding, all: totalAll } = collectionTotals(rows);
   const y = doc.lastAutoTable.finalY + 8;
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
