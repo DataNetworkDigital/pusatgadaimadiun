@@ -18,10 +18,12 @@ import { toDate } from './formatDate';
  * What a correction does to "is this tagihan settled":
  * - A payment confirmed before partial payments existed (a `legacy-`
  *   receipt) closed its tagihan whatever amount was typed, and the owner
- *   decided those stay settled and get listed. An Edit keeps that meaning for
- *   the tagihan it was confirmed for: its gap is re-measured as an
+ *   decided those stay settled and get listed. An Edit keeps that meaning:
+ *   the payment stays on the tagihan it was confirmed for, whatever the
+ *   amount (production has old overpayments), and a gap is re-measured as an
  *   old-shortfall waiver. Moving or cancelling it undoes the confirmation, so
- *   its waiver goes with it and the tagihan opens honestly.
+ *   its waiver goes with it and the tagihan opens honestly; a moved one is
+ *   marked `moved` and follows the new rules from then on.
  * - On a project closed by pelunasan dipercepat, the pelunasan closed
  *   everything by agreement: after an Edit every gap is closed by the
  *   pelunasan again, and the pelunasan row's tagihan is simply what was paid.
@@ -36,7 +38,8 @@ import { toDate } from './formatDate';
  * recomputed, never a partial array.
  */
 
-const isLegacy = (receipt) => String(receipt?.id ?? '').startsWith('legacy-');
+// Confirmed under the old rule and still where it was confirmed.
+const isLegacy = (receipt) => String(receipt?.id ?? '').startsWith('legacy-') && !receipt?.moved;
 const time = (value) => toDate(value)?.getTime() ?? 0;
 const nosOf = (receipt) => new Set((receipt?.allocations || []).map((a) => a.no));
 
@@ -95,6 +98,9 @@ export function deriveRowFields(payments, receipts) {
       for (const a of r.allocations || []) {
         if (a.no !== row.no) continue;
         sum += Number(a.amount) || 0;
+        // Same-day arrivals tie; the later one in the array wins. That only
+        // decides which account and transaction the row displays, never the
+        // amount, which is always the full sum.
         if (!latest || time(r.date) >= time(latest.date)) latest = r;
       }
     }
@@ -177,6 +183,9 @@ export function applyReceiptEdit(project, receiptId, { amount, at, accountId }) 
   guardCorrection(p, receipt, 'edit');
   const amt = Math.round(Number(amount) || 0);
   if (amt <= 0) throw new Error('Jumlah harus lebih dari 0');
+  // Written straight onto the receipt; Firestore refuses undefined.
+  if (!at) throw new Error('Tanggal diterima wajib diisi');
+  if (!accountId) throw new Error('Pilih rekening tujuan');
 
   const firstNo = receipt.allocations[0].no;
   let base = withoutReceipt(p, receipt);
@@ -191,9 +200,17 @@ export function applyReceiptEdit(project, receiptId, { amount, at, accountId }) 
     };
   }
 
-  const { allocations, leftover } = allocateReceipt(base, amt, firstNo);
-  if (!allocations.length || leftover > 0) {
-    throw new Error(`Jumlah melebihi sisa tagihan sebesar ${formatCurrency(leftover)}`);
+  let allocations;
+  if (isLegacy(receipt)) {
+    // An old payment stays on the tagihan it was confirmed for, whatever the
+    // amount, as confirming meant then.
+    allocations = [{ no: firstNo, amount: amt }];
+  } else {
+    const split = allocateReceipt(base, amt, firstNo);
+    if (!split.allocations.length || split.leftover > 0) {
+      throw new Error(`Jumlah melebihi sisa tagihan sebesar ${formatCurrency(split.leftover)}`);
+    }
+    allocations = split.allocations;
   }
 
   const edited = { ...receipt, amount: amt, date: at, accountId, allocations };
@@ -222,8 +239,8 @@ export function applyReceiptEdit(project, receiptId, { amount, at, accountId }) 
 export function moveTargets(project, receiptId) {
   const p = normalizeProject(project);
   const receipt = (p.receipts || []).find((r) => r.id === receiptId);
-  if (!receipt) return [];
-  const firstNo = receipt.allocations?.[0]?.no;
+  if (!receipt || !(receipt.allocations || []).length) return [];
+  const firstNo = receipt.allocations[0].no;
   const base = withoutReceipt(p, receipt);
   return openRows(base)
     .filter((r) => r.no !== firstNo)
@@ -235,7 +252,8 @@ export function moveTargets(project, receiptId) {
  * re-allocated from `startNo`. No money moves between accounts.
  * @returns {{ update, allocations }}
  */
-export function applyReceiptMove(project, receiptId, startNo) {
+export function applyReceiptMove(project, receiptId, startNoInput) {
+  const startNo = Number(startNoInput);
   const p = normalizeProject(project);
   const receipt = findReceipt(p, receiptId);
   guardCorrection(p, receipt, 'move');
@@ -255,7 +273,8 @@ export function applyReceiptMove(project, receiptId, startNo) {
       `Mulai bulan ${startNo}, sisa tagihan kurang ${formatCurrency(leftover)} untuk menampung pembayaran ini.`
     );
   }
-  const moved = { ...receipt, allocations };
+  // A moved old payment is no longer a confirmation of its old tagihan.
+  const moved = { ...receipt, allocations, ...(isLegacy(receipt) ? { moved: true } : {}) };
   const receipts = (p.receipts || []).map((r) => (r.id === receipt.id ? moved : r));
   return { update: finish(p, base.payments, receipts, receipt.date), allocations };
 }

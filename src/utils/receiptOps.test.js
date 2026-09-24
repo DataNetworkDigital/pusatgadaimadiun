@@ -334,3 +334,41 @@ describe('moveTargets', () => {
     ]);
   });
 });
+
+describe('receiptOps at its edges', () => {
+  it('refuses an edit without a date or an account, so nothing undefined is ever written', () => {
+    const p = stored([arrival('a', { 1: 5_500_000 })]);
+    expect(() => applyReceiptEdit(p, 'a', { amount: 5_000_000, at: undefined, accountId: 'bca' })).toThrow(/Tanggal/);
+    expect(() => applyReceiptEdit(p, 'a', { amount: 5_000_000, at, accountId: '' })).toThrow(/rekening/);
+  });
+
+  it('offers no months to move a receipt that paid nothing', () => {
+    const p = stored([{ id: 'broken', amount: 1_000_000, date: due(8), accountId: 'bca', allocations: [] }]);
+    expect(moveTargets(p, 'broken')).toEqual([]);
+  });
+
+  it('accepts the month to move to as text', () => {
+    const p = stored([arrival('a', { 1: 5_500_000 }), arrival('b', { 2: 5_500_000 })]);
+    expect(applyReceiptMove(p, 'b', '3').allocations).toEqual([{ no: 3, amount: 5_500_000 }]);
+  });
+});
+
+describe('applyReceiptEdit: an old payment stays on the tagihan it was confirmed for', () => {
+  it('keeps an old overpayment on its own row when only the date changes', () => {
+    const p = legacy({ 1: 6_000_000, 2: 5_500_000, 3: 5_500_000, 4: 100_000_000 }, { status: 'completed' });
+    const out = edit(p, 'legacy-1', 6_000_000, 'bri');
+    expect(out.allocations).toEqual([{ no: 1, amount: 6_000_000 }]);
+    expect(out.update.status).toBeUndefined();
+    expect(isSettled(after(p, out), row(out, 2))).toBe(true);
+  });
+
+  it('follows the new rules once it has been moved to another month', () => {
+    const p = legacy({ 2: 5_000_000 });
+    const moved = applyReceiptMove(p, 'legacy-2', 3);
+    const p2 = after(p, moved);
+    expect(p2.receipts.find((r) => r.id === 'legacy-2').moved).toBe(true);
+    const out = edit(p2, 'legacy-2', 4_000_000);
+    expect(row(out, 3)).not.toHaveProperty('closure');
+    expect(rowRemaining(after(p2, out), row(out, 3))).toBe(1_500_000);
+  });
+});
