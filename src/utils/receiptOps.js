@@ -1,5 +1,6 @@
 import { allocateReceipt, openRows } from './allocation';
-import { isSettled, rowRemaining } from './paymentStatus';
+import { rowRemaining } from './paymentStatus';
+import { statusChange } from './projectStatus';
 import { formatCurrency } from './formatCurrency';
 import { normalizeProject } from './normalizeProject';
 import { toDate } from './formatDate';
@@ -144,15 +145,6 @@ function withoutReceipt(project, receipt) {
     return next;
   });
   return { ...project, payments, receipts: (project.receipts || []).filter((r) => r.id !== receipt.id) };
-}
-
-function statusChange(project, payments, receipts, at) {
-  if (project.settledEarly || project.status === 'default') return {};
-  const after = { ...project, payments, receipts };
-  const allSettled = payments.length > 0 && payments.every((row) => isSettled(after, row));
-  if (project.status === 'completed' && !allSettled) return { status: 'active', closedAt: null };
-  if (project.status === 'active' && allSettled) return { status: 'completed', closedAt: at ?? null };
-  return {};
 }
 
 // The update to write: rows with their derived fields recomputed, the whole
