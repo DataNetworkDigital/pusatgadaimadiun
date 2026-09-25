@@ -310,6 +310,9 @@ describe('settling early after the pelunasan was extended', () => {
     const s = settlementSuggestion(p, today);
     expect(s.amount).toBe(95_500_000);
     expect(s.raisedToMinimum).toBe(false);
+    // Even when the rule itself goes below zero there is no minimum to show.
+    const low = paid(base({ disbursedAmount: 1_000_000 }), [{ no: 4, amount: 20_000_000 }]);
+    expect(settlementSuggestion(low, today)).toMatchObject({ amount: 0, minimum: 0, raisedToMinimum: false });
   });
 
   it('does not charge twice a tunggakan the extension already took into its principal', () => {

@@ -86,8 +86,10 @@ export function settlementSuggestion(project, today = new Date()) {
 
   // After a Mundur or Diperpanjang the owner's rule, which works from modal
   // keluar, can fall below what is left of the principal; the suggestion is
-  // then at least that principal, plus what is short elsewhere (Gde, 25 Sep
-  // 2026). A project never extended keeps the rule alone.
+  // then at least that principal, plus what the rule counts as short (Gde,
+  // 25 Sep 2026). Like the rule, it leaves out later months nobody has
+  // started paying, a tunggakan riding on one included. A project never
+  // extended keeps the rule alone.
   const final = currentFinal(project);
   const principalLeft = final
     ? Math.max(
@@ -109,7 +111,7 @@ export function settlementSuggestion(project, today = new Date()) {
     dueLeft: 0,
     principalLeft,
     minimum,
-    raisedToMinimum: minimum > byRule,
+    raisedToMinimum: extended && minimum > byRule,
     amount: Math.max(0, byRule, minimum),
   };
 }
