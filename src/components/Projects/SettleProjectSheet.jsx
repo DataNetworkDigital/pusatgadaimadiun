@@ -9,8 +9,9 @@ import { settlementSuggestion } from '../../utils/settlement';
 
 // Early full settlement (pelunasan dipercepat). The default amount follows the
 // owner's rule: modal keluar (disbursed) + the current month's interest, with
-// partial payments taken into account (see settlementSuggestion). All
-// remaining unpaid scheduled months are dropped once this is confirmed.
+// partial payments taken into account (see settlementSuggestion); after a
+// Mundur or Diperpanjang it is never below the principal left. All remaining
+// unpaid scheduled months are dropped once this is confirmed.
 export default function SettleProjectSheet({ open, onClose, project, accounts, onConfirm }) {
   const [amount, setAmount] = useState(0);
   const [accountId, setAccountId] = useState('');
@@ -116,6 +117,18 @@ export default function SettleProjectSheet({ open, onClose, project, accounts, o
               <span>Pelunasan yang sudah masuk</span>
               <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
                 −{formatCurrency(suggestion.principalPaid)}
+              </span>
+            </div>
+          )}
+          {suggestion.raisedToMinimum && (
+            <div className="flex justify-between">
+              <span>
+                {suggestion.shortfall > 0
+                  ? 'Minimal sisa pokok + kurang bayar (setelah diperpanjang)'
+                  : 'Minimal sisa pokok (setelah diperpanjang)'}
+              </span>
+              <span className="font-num font-semibold text-ink" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {formatCurrency(suggestion.minimum)}
               </span>
             </div>
           )}

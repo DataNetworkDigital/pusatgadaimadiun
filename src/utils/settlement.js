@@ -1,6 +1,7 @@
 import { isSettled, rowCarriedIn, rowReceived, rowRemaining, rowState } from './paymentStatus';
 import { normalizeProject } from './normalizeProject';
 import { toDate } from './formatDate';
+import { currentFinal } from './extension';
 
 /**
  * Pelunasan dipercepat, decided as data. DataContext writes the result.
@@ -43,10 +44,11 @@ export function settlementSuggestion(project, today = new Date()) {
     (s, r) => s + Math.max(0, rowReceived(project, r) - rowCarriedIn(project, r)),
     0
   );
-  const carriedOntoPelunasan = finals.reduce(
-    (s, r) => s + Math.max(0, rowCarriedIn(project, r) - rowReceived(project, r)),
-    0
-  );
+  // Only a pelunasan still open: a closed one (Diperpanjang) took its
+  // tunggakan into the extension's principal.
+  const carriedOntoPelunasan = finals
+    .filter((r) => !r.closure)
+    .reduce((s, r) => s + Math.max(0, rowCarriedIn(project, r) - rowReceived(project, r)), 0);
 
   // The pelunasan has already come back in full: a project completed by its
   // payments and reopened by a correction, or a pelunasan paid before the last
@@ -80,6 +82,22 @@ export function settlementSuggestion(project, today = new Date()) {
       .filter((r) => r !== current && r.type === 'interest' && rowState(project, r) === 'kurang' && isDue(r))
       .reduce((s, r) => s + rowRemaining(project, r), 0) + carriedOntoPelunasan;
 
+  const byRule = disbursed + currentInterest + shortfall - principalPaid;
+
+  // After a Mundur or Diperpanjang the owner's rule, which works from modal
+  // keluar, can fall below what is left of the principal; the suggestion is
+  // then at least that principal, plus what is short elsewhere (Gde, 25 Sep
+  // 2026). A project never extended keeps the rule alone.
+  const final = currentFinal(project);
+  const principalLeft = final
+    ? Math.max(
+        0,
+        rowRemaining(project, final) - Math.max(0, rowCarriedIn(project, final) - rowReceived(project, final))
+      )
+    : 0;
+  const extended = (project?.extensions || []).length > 0;
+  const minimum = extended ? principalLeft + shortfall : 0;
+
   return {
     disbursed,
     currentInterest,
@@ -89,7 +107,10 @@ export function settlementSuggestion(project, today = new Date()) {
     laterDropped,
     pelunasanDone,
     dueLeft: 0,
-    amount: Math.max(0, disbursed + currentInterest + shortfall - principalPaid),
+    principalLeft,
+    minimum,
+    raisedToMinimum: minimum > byRule,
+    amount: Math.max(0, byRule, minimum),
   };
 }
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applySettlement, settlementSuggestion } from './settlement';
+import { applyExtension } from './extension';
 import { isSettled, projectReceivedTotal } from './paymentStatus';
 
 // Nilai project 100jt, modal keluar 94,5jt (one month of 5,5% taken up front),
@@ -272,5 +273,56 @@ describe('settling after a tunggakan was carried', () => {
     const after = settle(p0, settlementSuggestion(p0, today).amount);
     expect(after.payments.find((r) => r.no === 2).closure.kind).toBe('carry');
     expect(after.payments.every((r) => isSettled(after, r))).toBe(true);
+  });
+});
+
+describe('settling early after the pelunasan was extended', () => {
+  const today = new Date(2026, 9, 20);
+  const at = new Date(2026, 9, 5);
+  const extend = (p, kind, over = {}) => {
+    const out = applyExtension(p, { kind, months: 2, ratePct: 6.5, startMode: 'today', at, id: 'e1', ...over });
+    return { ...p, ...out.update };
+  };
+  const bagiHasil = [{ no: 1, amount: 5_500_000 }, { no: 2, amount: 5_500_000 }, { no: 3, amount: 5_500_000 }];
+
+  it('never suggests less than what is left of the principal after Diperpanjang (Gde, 25 Sep 2026)', () => {
+    // 30 of the 100jt pelunasan paid, the 70jt left extended two months at 6,5%.
+    const p = extend(paid(base({ paymentDayOfMonth: 5 }), [...bagiHasil, { no: 4, amount: 30_000_000 }]), 'sisa');
+    const s = settlementSuggestion(p, today);
+    // The owner's rule alone: 94,5jt + 4,55jt this month - 30jt already back = 69,05jt.
+    expect(s.amount).toBe(70_000_000);
+    expect(s.principalLeft).toBe(70_000_000);
+    expect(s.minimum).toBe(70_000_000);
+    expect(s.raisedToMinimum).toBe(true);
+  });
+
+  it('keeps the owner\'s rule when it asks for more, as after a Mundur', () => {
+    const p = extend(paid(base({ paymentDayOfMonth: 5 }), bagiHasil), 'mundur');
+    const s = settlementSuggestion(p, today);
+    expect(s.amount).toBe(94_500_000 + 6_500_000);
+    expect(s.principalLeft).toBe(100_000_000);
+    expect(s.raisedToMinimum).toBe(false);
+  });
+
+  it('leaves a project that was never extended on the owner\'s rule alone', () => {
+    // Modal keluar typed lower by hand: the rule asks 90jt + 5,5jt, below the 100jt principal.
+    const p = paid(base({ disbursedAmount: 90_000_000 }), [{ no: 1, amount: 5_500_000 }]);
+    const s = settlementSuggestion(p, today);
+    expect(s.amount).toBe(95_500_000);
+    expect(s.raisedToMinimum).toBe(false);
+  });
+
+  it('does not charge twice a tunggakan the extension already took into its principal', () => {
+    // Bulan 3 carried onto the pelunasan, 3jt paid on it, then the 102,5jt left extended.
+    const p0 = paid(base({ paymentDayOfMonth: 5 }), [{ no: 1, amount: 5_500_000 }, { no: 2, amount: 5_500_000 }, { no: 4, amount: 3_000_000 }]);
+    const carried = {
+      ...p0,
+      payments: p0.payments.map((r) => (r.no === 3 ? { ...r, closure: { kind: 'carry', amount: 5_500_000, toNo: 4 } } : r)),
+    };
+    const p = extend(carried, 'sisa');
+    const s = settlementSuggestion(p, today);
+    expect(s.shortfall).toBe(0);
+    expect(s.principalLeft).toBe(102_500_000);
+    expect(s.amount).toBe(102_500_000);
   });
 });
