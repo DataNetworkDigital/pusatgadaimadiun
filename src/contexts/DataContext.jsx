@@ -13,7 +13,7 @@ import { generateProjectSchedule, recomputeUnpaidSchedule } from '../utils/proje
 import { notifyTelegram, syncToDanaTrack } from '../utils/telegram';
 import { allocateReceipt, openRows } from '../utils/allocation';
 import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
-import { applySettlement } from '../utils/settlement';
+import { applySettlement, applySettlementUndo } from '../utils/settlement';
 import { applyReceiptCancel, applyReceiptEdit, applyReceiptMove } from '../utils/receiptOps';
 import { applyCloseRemainder, applyReopenRemainder } from '../utils/remainderOps';
 import { applyExtension, applyUndoExtension, currentFinal } from '../utils/extension';
@@ -1285,6 +1285,57 @@ export function DataProvider({ children }) {
     toast('Project dilunasi lebih cepat');
   }
 
+  // Undo a pelunasan dipercepat (spec 2026-09-28 §3): its money leaves the
+  // account as its transaction says now, and the schedule goes back to what
+  // it was before the pelunasan.
+  async function undoSettlement(projectId, { seenWriteId } = {}) {
+    const outcome = await inProjectTransaction(projectId, async (t, project, ref, writeId) => {
+      const { update, removed } = applySettlementUndo(project);
+      // Reads before writes: the transactions, then the accounts they touch.
+      // A transaction or account deleted since cannot be reversed.
+      const found = [];
+      for (const receipt of removed) {
+        const txRef = receipt.transactionId ? doc(db, C('transactions'), receipt.transactionId) : null;
+        const txSnap = txRef ? await t.get(txRef) : null;
+        if (txSnap?.exists()) found.push({ txRef, tx: txSnap.data() });
+      }
+      const deltas = new Map();
+      for (const { tx } of found) {
+        for (const [accountId, amount] of reversalOf(tx)) {
+          if (accountId) deltas.set(accountId, (deltas.get(accountId) || 0) + amount);
+        }
+      }
+      const accountWrites = [];
+      for (const [accountId, amount] of deltas) {
+        if (!amount) continue;
+        const accRef = doc(db, C('accounts'), accountId);
+        const accSnap = await t.get(accRef);
+        if (accSnap.exists()) accountWrites.push({ accRef, amount });
+      }
+
+      for (const { accRef, amount } of accountWrites) {
+        t.update(accRef, { balance: increment(amount), updatedAt: serverTimestamp() });
+      }
+      for (const { txRef } of found) t.delete(txRef);
+      t.update(ref, { ...update, lastWriteId: writeId });
+      return { status: update.status, balanceMoved: accountWrites.length > 0 };
+    }, {
+      // Undone already: by this call's own earlier attempt whose answer was
+      // lost, or by another device.
+      alreadyDone: (p) => !p.settledEarly,
+      seenWriteId,
+    });
+    const base =
+      outcome?.status === 'completed'
+        ? 'Pelunasan dipercepat dibatalkan'
+        : 'Pelunasan dipercepat dibatalkan, project aktif lagi';
+    toast(
+      outcome && !outcome.balanceMoved
+        ? `${base}. Saldo tidak diubah karena transaksi atau rekeningnya sudah tidak ada`
+        : base
+    );
+  }
+
   // Full cancel/undo: reverse ALL cash effects as if the project never existed.
   // - Return the disbursed funding to the source account
   // - Claw back every received return from the account it landed in
@@ -1398,7 +1449,7 @@ export function DataProvider({ children }) {
     addTransaction, updateTransaction, deleteTransaction,
     addDebt, updateDebt, deleteDebt, payInstallment,
     addReminder, updateReminder, deleteReminder,
-    addProject, updateProject, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, deleteProject,
+    addProject, updateProject, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject,
     resetAllData,
   };
 
