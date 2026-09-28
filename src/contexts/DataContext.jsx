@@ -14,6 +14,7 @@ import { notifyTelegram, syncToDanaTrack } from '../utils/telegram';
 import { allocateReceipt, openRows } from '../utils/allocation';
 import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
 import { applySettlement, applySettlementUndo } from '../utils/settlement';
+import { applyCapitalCorrection } from '../utils/capitalCorrection';
 import { applyReceiptCancel, applyReceiptEdit, applyReceiptMove } from '../utils/receiptOps';
 import { applyCloseRemainder, applyReopenRemainder } from '../utils/remainderOps';
 import { applyExtension, applyUndoExtension, currentFinal } from '../utils/extension';
@@ -640,6 +641,78 @@ export function DataProvider({ children }) {
       return true;
     }, { seenWriteId });
     if (saved) toast('Project tersimpan');
+  }
+
+  // Koreksi modal (spec 2026-09-28 §4): Nilai Project, Modal Keluar or
+  // Rekening Sumber typed wrong, corrected after money has arrived. The
+  // funding transaction says where the modal left from; it is reversed as it
+  // stands and written again with the corrected amount and account.
+  async function correctCapital(projectId, { principalAmount, disbursedAmount, sourceAccountId, seenWriteId } = {}) {
+    const changed = await inProjectTransaction(projectId, async (t, project, ref, writeId) => {
+      const { update, moved } = applyCapitalCorrection(project, {
+        principalAmount,
+        disbursedAmount,
+        sourceAccountId,
+        at: Timestamp.now(),
+      });
+      if (Object.keys(update).length === 0) return false;
+      const moneyChanged = update.disbursedAmount !== undefined || update.sourceAccountId !== undefined;
+      const newDisbursed = Math.round(Number(disbursedAmount) || 0);
+
+      // Reads before writes.
+      let fundingRef = null;
+      let funding = null;
+      if (moneyChanged) {
+        fundingRef = project.fundingTransactionId ? doc(db, C('transactions'), project.fundingTransactionId) : null;
+        const snap = fundingRef ? await t.get(fundingRef) : null;
+        funding = snap?.exists() ? snap.data() : null;
+        if (!funding) {
+          throw new Error(
+            'Transaksi pendanaan project ini tidak ditemukan, jadi modal keluar dan rekening sumber tidak bisa dikoreksi.'
+          );
+        }
+      }
+      const txWrites = [];
+      for (const { receipt, allocations } of moved) {
+        const txRef = receipt.transactionId ? doc(db, C('transactions'), receipt.transactionId) : null;
+        const snap = txRef ? await t.get(txRef) : null;
+        if (snap?.exists()) txWrites.push({ txRef, allocations });
+      }
+      const deltas = new Map();
+      const add = (accountId, amount) => {
+        if (accountId) deltas.set(accountId, (deltas.get(accountId) || 0) + amount);
+      };
+      if (moneyChanged) {
+        for (const [accountId, amount] of reversalOf(funding)) add(accountId, amount);
+        add(sourceAccountId, -newDisbursed);
+      }
+      const accountWrites = [];
+      for (const [accountId, amount] of deltas) {
+        if (!amount) continue;
+        const accRef = doc(db, C('accounts'), accountId);
+        const accSnap = await t.get(accRef);
+        if (!accSnap.exists()) {
+          // The modal cannot leave an account that is gone; an old account
+          // deleted since simply cannot be given its money back.
+          if (accountId === sourceAccountId) throw new Error('Rekening sumber tidak ditemukan.');
+          continue;
+        }
+        accountWrites.push({ accRef, amount });
+      }
+
+      for (const { accRef, amount } of accountWrites) {
+        t.update(accRef, { balance: increment(amount), updatedAt: serverTimestamp() });
+      }
+      if (moneyChanged) {
+        t.update(fundingRef, { type: 'expense', amount: newDisbursed, fromAccount: sourceAccountId, toAccount: null });
+      }
+      for (const { txRef, allocations } of txWrites) {
+        t.update(txRef, { paymentNo: allocations[0].no, description: receiptDescription(project, allocations) });
+      }
+      t.update(ref, { ...update, lastWriteId: writeId });
+      return true;
+    }, { seenWriteId });
+    if (changed) toast('Modal dikoreksi');
   }
 
   // Where money that comes in lands. `account` is either an account id or the
@@ -1449,7 +1522,7 @@ export function DataProvider({ children }) {
     addTransaction, updateTransaction, deleteTransaction,
     addDebt, updateDebt, deleteDebt, payInstallment,
     addReminder, updateReminder, deleteReminder,
-    addProject, updateProject, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject,
+    addProject, updateProject, correctCapital, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject,
     resetAllData,
   };
 
