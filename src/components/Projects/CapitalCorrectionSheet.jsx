@@ -53,6 +53,8 @@ function CorrectionForm({ onClose, project, accounts, onSubmit }) {
     !!preview.update && (preview.update.disbursedAmount !== undefined || preview.update.sourceAccountId !== undefined);
   const funding = (transactions || []).find((t) => t.id === project.fundingTransactionId) || null;
   const fundingMissing = moneyChange && !loading && !funding;
+  // An account deleted since cannot be the one the modal left from.
+  const accountKnown = (accounts || []).some((a) => a.id === accountId);
   const money =
     moneyChange && funding
       ? fundingMoves(funding, { disbursedAmount: disbursed, sourceAccountId: accountId }, (id) =>
@@ -84,7 +86,13 @@ function CorrectionForm({ onClose, project, accounts, onSubmit }) {
         <button
           type="button"
           className="btn-primary w-full"
-          disabled={submitting || !rules.ok || !!preview.error || nothing || (moneyChange && (loading || !funding))}
+          disabled={
+            submitting ||
+            !rules.ok ||
+            !!preview.error ||
+            nothing ||
+            (moneyChange && (loading || !funding || !accountKnown))
+          }
           onClick={submit}
         >
           {submitting ? 'Menyimpan…' : 'Simpan koreksi'}
@@ -122,6 +130,9 @@ function CorrectionForm({ onClose, project, accounts, onSubmit }) {
               ))}
             </select>
           </div>
+          {moneyChange && !accountKnown && (
+            <p className="text-[13px] text-terra leading-snug">Pilih rekening sumber.</p>
+          )}
           {fundingMissing && (
             <p className="text-[13px] text-terra leading-snug">
               Transaksi pendanaan project ini tidak ditemukan, jadi modal keluar dan rekening sumber tidak bisa
@@ -134,6 +145,22 @@ function CorrectionForm({ onClose, project, accounts, onSubmit }) {
             !nothing && (
               <div className="bg-cream-deep rounded-xl p-3 text-[13px] text-ink-soft space-y-1.5">
                 <div className="text-[12px] font-semibold text-ink">Yang berubah</div>
+                {preview.update?.disbursedAmount !== undefined && (
+                  <div className="flex justify-between gap-2">
+                    <span>Modal Keluar</span>
+                    <span className="font-num text-ink text-right">
+                      {formatCurrency(project.disbursedAmount)} → {formatCurrency(disbursed)}
+                    </span>
+                  </div>
+                )}
+                {preview.update?.sourceAccountId !== undefined && (
+                  <div className="flex justify-between gap-2">
+                    <span>Rekening Sumber</span>
+                    <span className="text-ink text-right">
+                      {accountName(project.sourceAccountId)} → {accountName(accountId)}
+                    </span>
+                  </div>
+                )}
                 {changedRows.map((r) => (
                   <div key={r.no} className="flex justify-between gap-2">
                     <span>{r.type === 'final' ? 'Pelunasan' : `Bulan ${r.no}`}</span>
@@ -155,6 +182,9 @@ function CorrectionForm({ onClose, project, accounts, onSubmit }) {
                     </span>
                   </div>
                 ))}
+                {moneyChange && funding && money.length === 0 && (
+                  <div className="text-[12px] text-ink-mute">Saldo rekening tidak berubah.</div>
+                )}
               </div>
             )
           )}

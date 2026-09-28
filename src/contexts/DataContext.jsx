@@ -703,7 +703,16 @@ export function DataProvider({ children }) {
       }
       t.update(ref, { ...update, lastWriteId: writeId });
       return true;
-    }, { seenWriteId });
+    }, { seenWriteId }).catch((e) => {
+      // The sheet keeps what the owner typed, so after another device's
+      // write it has to be opened again to show the project as it is now.
+      if (/baru saja berubah/.test(e?.message || '')) {
+        throw new Error('Data project ini baru saja berubah. Tutup koreksi ini, lalu buka Koreksi modal lagi.', {
+          cause: e,
+        });
+      }
+      throw e;
+    });
     if (changed) toast('Modal dikoreksi');
   }
 

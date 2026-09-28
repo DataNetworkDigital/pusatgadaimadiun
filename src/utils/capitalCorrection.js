@@ -98,11 +98,15 @@ function replay(p, oldPrincipal, newPrincipal, paidBefore = () => 0) {
   const ordered = [...all.filter((r) => isLegacy(r)), ...all.filter((r) => !isLegacy(r))];
   const replayed = [];
   const moved = [];
+  // Each stored receipt and what it became, matched by the receipt itself,
+  // not its id, so the list is written back exactly as it was stored.
+  const placed = new Map();
   for (const receipt of ordered) {
     const firstNo = receipt.allocations?.[0]?.no;
     const amount = Math.round(Number(receipt.amount) || 0);
     if (isLegacy(receipt) || amount <= 0) {
       replayed.push(receipt);
+      placed.set(receipt, receipt);
       if (!isLegacy(receipt)) continue;
       // An old confirmation stays on the tagihan it was confirmed for,
       // whatever the amount, and a gap there is an old shortfall again.
@@ -134,10 +138,10 @@ function replay(p, oldPrincipal, newPrincipal, paidBefore = () => 0) {
       moved.push({ receipt: next, allocations: split.allocations });
     }
     replayed.push(next);
+    placed.set(receipt, next);
   }
   // Written back in the order they were recorded.
-  const byId = new Map(replayed.map((r) => [r.id, r]));
-  const receipts = all.map((r) => byId.get(r.id) ?? r);
+  const receipts = all.map((r) => placed.get(r) ?? r);
   return { payments: deriveRowFields(rows, receipts), receipts, moved };
 }
 
