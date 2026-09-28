@@ -15,10 +15,11 @@ import PelunasanRestSheet from './PelunasanRestSheet';
 import CloseProjectSheet from './CloseProjectSheet';
 import SettleProjectSheet from './SettleProjectSheet';
 import ProjectForm from './ProjectForm';
+import CapitalCorrectionSheet from './CapitalCorrectionSheet';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { projectSummary } from '../../utils/projectSchedule';
-import { isSettled, isShort, rowCarriedIn, rowDue, rowReceived, rowRemaining, rowState } from '../../utils/paymentStatus';
+import { hasAnyReceipt, isSettled, isShort, rowCarriedIn, rowDue, rowReceived, rowRemaining, rowState } from '../../utils/paymentStatus';
 import { applyReopenRemainder } from '../../utils/remainderOps';
 import { extensionOptions, undoCheck } from '../../utils/extension';
 import { rolloverSource } from '../../utils/rollover';
@@ -325,7 +326,7 @@ export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDemo } = useDemo();
-  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject, updateProject } =
+  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject, updateProject, correctCapital } =
     useData();
   const [managing, setManaging] = useState(null); // a receipt id, or null when closed
   const [remainderNo, setRemainderNo] = useState(null); // a tagihan number, or null when closed
@@ -342,6 +343,7 @@ export default function ProjectDetail() {
   const [rollingOver, setRollingOver] = useState(false);
   const [undoingExtension, setUndoingExtension] = useState(null); // an extension id, or null
   const [undoingSettlement, setUndoingSettlement] = useState(false);
+  const [correctingCapital, setCorrectingCapital] = useState(false);
 
   const base = isDemo ? '/demo' : '';
   const project = projects.find((p) => p.id === id);
@@ -380,6 +382,11 @@ export default function ProjectDetail() {
   // paid (spec 7.2).
   const askRest = askRestFor != null && (project.receipts || []).some((r) => r.id === askRestFor);
   const isRolloverProject = project.fundingMode === 'rollover';
+  // Once money has arrived or a month is closed, Edit Project locks the
+  // modal; typos are corrected through Koreksi modal instead.
+  const capitalLocked = hasAnyReceipt(project) || (project.payments || []).some((r) => r.closure);
+  const canCorrectCapital =
+    capitalLocked && !isDefault && !isRolloverProject && !project.rolledOverToProjectId;
   const nextContract = project.rolledOverToProjectId
     ? projects.find((p) => p.id === project.rolledOverToProjectId)
     : null;
@@ -535,6 +542,17 @@ export default function ProjectDetail() {
           />
         )}
       </Card>
+      {canCorrectCapital && (
+        <button
+          type="button"
+          onClick={() => setCorrectingCapital(true)}
+          className="flex items-center gap-2 w-full px-4 py-3 mb-3.5 bg-paper border border-line rounded-2xl text-[13px] text-indigo font-semibold active:bg-cream-deep"
+        >
+          <IcEdit size={16} sw={1.9} />
+          <span className="flex-1 text-left">Salah ketik modal? Koreksi modal</span>
+          <span>→</span>
+        </button>
+      )}
 
       {project.proofUrl && (
         <a
@@ -677,6 +695,13 @@ export default function ProjectDetail() {
         onSubmit={(data) => updateProject(project.id, data)}
         accounts={accounts}
         initial={project}
+      />
+      <CapitalCorrectionSheet
+        open={correctingCapital}
+        onClose={() => setCorrectingCapital(false)}
+        project={project}
+        accounts={accounts}
+        onSubmit={(data) => correctCapital(project.id, data)}
       />
       <ReceiptManageSheet
         open={managing !== null}

@@ -263,7 +263,7 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
       <form id="project-form" onSubmit={handleSubmit} className="space-y-4">
         {capitalLocked && !scheduleLocked && (
           <div className="bg-emas-soft border border-emas/30 rounded-xl p-3 text-[12px] text-ink-soft leading-snug">
-            ⚠️ Sudah ada pembayaran masuk atau tagihan yang ditutup. Modal, rekening sumber, dan tanggal mulai tidak bisa diubah. Durasi, return %, dan tanggal pembayaran masih bisa disesuaikan (jadwal pembayaran yang belum diterima akan dihitung ulang).
+            ⚠️ Sudah ada pembayaran masuk atau tagihan yang ditutup. Nilai project, modal keluar, dan rekening sumber dibetulkan lewat tombol Koreksi modal di halaman project. Tanggal mulai tidak bisa diubah. Durasi, return %, dan tanggal pembayaran masih bisa disesuaikan (jadwal pembayaran yang belum diterima akan dihitung ulang).
           </div>
         )}
         {scheduleLocked && (
