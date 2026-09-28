@@ -15,6 +15,7 @@ import { allocateReceipt, openRows } from '../utils/allocation';
 import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
 import { applySettlement, applySettlementUndo } from '../utils/settlement';
 import { applyCapitalCorrection, fundingMoves } from '../utils/capitalCorrection';
+import { applyPrincipalPayment, applyPrincipalPaymentUndo } from '../utils/principalPayment';
 import { applyReceiptCancel, applyReceiptEdit, applyReceiptMove } from '../utils/receiptOps';
 import { applyCloseRemainder, applyReopenRemainder } from '../utils/remainderOps';
 import { applyExtension, applyUndoExtension, currentFinal } from '../utils/extension';
@@ -928,6 +929,83 @@ export function DataProvider({ children }) {
     return { receiptId: txRef.id, finalShort: !!outcome?.finalShort };
   }
 
+  // Pelunasan bertahap (spec 2026-09-28 §5): part of the principal paid
+  // early. The money lands on the pelunasan like any arrival of money, and
+  // the bagi hasil from the chosen month follow the principal that is left.
+  async function recordPrincipalPayment(projectId, { amount, date, account, fromNo = null, seenWriteId }) {
+    const amt = Math.round(Number(amount) || 0);
+    if (amt <= 0) throw new Error('Jumlah harus lebih dari 0');
+    if (!account) throw new Error('Pilih rekening tujuan');
+    const at = Timestamp.fromDate(date instanceof Date ? date : new Date());
+    // Made before the transaction so a rerun can recognise its own payment.
+    const txRef = doc(collection(db, C('transactions')));
+    await inProjectTransaction(projectId, (t, project, ref, writeId) => {
+      const target = resolveMoneyIn(account);
+      const { update, finalNo } = applyPrincipalPayment(project, {
+        amount: amt,
+        at,
+        accountId: target.id,
+        transactionId: txRef.id,
+        fromNo,
+      });
+      creditResolved(t, target, amt);
+      t.set(txRef, {
+        type: 'income',
+        amount: amt,
+        description: `Bayar sebagian pokok project: ${project.name}`,
+        date: at,
+        fromAccount: null,
+        toAccount: target.id,
+        debtId: null,
+        projectId,
+        paymentNo: finalNo,
+        receiptId: txRef.id,
+        createdAt: serverTimestamp(),
+      });
+      t.update(ref, { ...update, lastWriteId: writeId });
+    }, { alreadyDone: (p) => (p.receipts || []).some((r) => r.id === txRef.id), seenWriteId });
+    toast('Pembayaran pokok tercatat');
+  }
+
+  // Undo the latest early principal payment: its money leaves the account as
+  // its transaction says now, and the bagi hasil it lowered go back.
+  async function undoPrincipalPayment(projectId, { stepId, seenWriteId } = {}) {
+    const outcome = await inProjectTransaction(projectId, async (t, project, ref, writeId) => {
+      const { update, receipt } = applyPrincipalPaymentUndo(project, stepId);
+      // Reads before writes.
+      const txRef = receipt.transactionId ? doc(db, C('transactions'), receipt.transactionId) : null;
+      const txSnap = txRef ? await t.get(txRef) : null;
+      const tx = txSnap?.exists() ? txSnap.data() : null;
+      const deltas = new Map();
+      for (const [accountId, amount] of tx ? reversalOf(tx) : []) {
+        if (accountId) deltas.set(accountId, (deltas.get(accountId) || 0) + amount);
+      }
+      const accountWrites = [];
+      for (const [accountId, amount] of deltas) {
+        if (!amount) continue;
+        const accRef = doc(db, C('accounts'), accountId);
+        const accSnap = await t.get(accRef);
+        if (accSnap.exists()) accountWrites.push({ accRef, amount });
+      }
+
+      for (const { accRef, amount } of accountWrites) {
+        t.update(accRef, { balance: increment(amount), updatedAt: serverTimestamp() });
+      }
+      if (tx) t.delete(txRef);
+      t.update(ref, { ...update, lastWriteId: writeId });
+      return { balanceMoved: accountWrites.length > 0 };
+    }, {
+      // Gone already: this call's own earlier attempt, or another device.
+      alreadyDone: (p) => !(p.principalPayments || []).some((s) => s.id === stepId),
+      seenWriteId,
+    });
+    toast(
+      outcome && !outcome.balanceMoved
+        ? 'Bayar pokok dibatalkan. Saldo tidak diubah karena transaksi atau rekeningnya sudah tidak ada'
+        : 'Bayar pokok dibatalkan'
+    );
+  }
+
   // ===== Corrections to one arrival of money =====
   // Each reads the project inside a transaction and decides the correction
   // with receiptOps, which refuses before anything is written; then it moves
@@ -1511,7 +1589,7 @@ export function DataProvider({ children }) {
     addTransaction, updateTransaction, deleteTransaction,
     addDebt, updateDebt, deleteDebt, payInstallment,
     addReminder, updateReminder, deleteReminder,
-    addProject, updateProject, correctCapital, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject,
+    addProject, updateProject, correctCapital, recordReceipt, recordPrincipalPayment, undoPrincipalPayment, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject,
     resetAllData,
   };
 
