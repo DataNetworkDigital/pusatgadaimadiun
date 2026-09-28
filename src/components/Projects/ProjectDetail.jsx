@@ -16,14 +16,16 @@ import CloseProjectSheet from './CloseProjectSheet';
 import SettleProjectSheet from './SettleProjectSheet';
 import ProjectForm from './ProjectForm';
 import CapitalCorrectionSheet from './CapitalCorrectionSheet';
+import PrincipalPaymentSheet from './PrincipalPaymentSheet';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { projectSummary } from '../../utils/projectSchedule';
 import { hasAnyReceipt, isSettled, isShort, rowCarriedIn, rowDue, rowReceived, rowRemaining, rowState } from '../../utils/paymentStatus';
 import { applyReopenRemainder } from '../../utils/remainderOps';
-import { extensionOptions, undoCheck } from '../../utils/extension';
+import { currentFinal, extensionOptions, undoCheck } from '../../utils/extension';
 import { rolloverSource } from '../../utils/rollover';
 import { settlementUndoPreview } from '../../utils/settlement';
+import { principalPaymentRules, principalUndoCheck, stepBase } from '../../utils/principalPayment';
 import {
   IcChevronLeft,
   IcCalendar,
@@ -322,11 +324,31 @@ function settleUndoMessage(preview, accountName) {
   return parts.join(' ');
 }
 
+// One line per early principal payment: when, how much, and what the bagi
+// hasil follow afterwards.
+function principalStepLabel(project, index) {
+  const s = (project.principalPayments || [])[index];
+  const head = `Pokok dibayar ${formatCurrency(s.amount)} pada ${formatDate(s.at)}.`;
+  return s.fromNo == null
+    ? `${head} Bagi hasil tetap.`
+    : `${head} Bagi hasil mulai bulan ${s.fromNo} dari sisa pokok ${formatCurrency(stepBase(project, index))}.`;
+}
+
+// The confirmation for undoing the latest early principal payment.
+function principalUndoMessage(project, check, accountName) {
+  if (!check.ok) return check.why;
+  const final = currentFinal(project);
+  const pelunasan = (final ? rowRemaining(project, final) : 0) + (Number(check.step.amount) || 0);
+  const months =
+    check.step.fromNo == null ? '' : ` Bagi hasil mulai bulan ${check.step.fromNo} kembali seperti sebelumnya.`;
+  return `Uang ${formatCurrency(check.step.amount)} ditarik lagi dari ${accountName(check.receipt.accountId)}.${months} Pelunasan kembali ditagih ${formatCurrency(pelunasan)}.`;
+}
+
 export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDemo } = useDemo();
-  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject, updateProject, correctCapital } =
+  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject, updateProject, correctCapital, recordPrincipalPayment, undoPrincipalPayment } =
     useData();
   const [managing, setManaging] = useState(null); // a receipt id, or null when closed
   const [remainderNo, setRemainderNo] = useState(null); // a tagihan number, or null when closed
@@ -344,6 +366,8 @@ export default function ProjectDetail() {
   const [undoingExtension, setUndoingExtension] = useState(null); // an extension id, or null
   const [undoingSettlement, setUndoingSettlement] = useState(false);
   const [correctingCapital, setCorrectingCapital] = useState(false);
+  const [payingPrincipal, setPayingPrincipal] = useState(false);
+  const [undoingPrincipal, setUndoingPrincipal] = useState(null); // a step id, or null
 
   const base = isDemo ? '/demo' : '';
   const project = projects.find((p) => p.id === id);
@@ -377,6 +401,9 @@ export default function ProjectDetail() {
   const extensions = project.extensions || [];
   const latestExtension = extensions[extensions.length - 1] || null;
   const canUndoExtension = isActive && !!latestExtension && undoCheck(project).ok;
+  const principalRules = principalPaymentRules(project);
+  const principalSteps = project.principalPayments || [];
+  const principalUndo = principalSteps.length ? principalUndoCheck(project) : { ok: false, why: '' };
   const rollover = rolloverSource(project);
   // Asked once the screen shows the payment that left the pelunasan partly
   // paid (spec 7.2).
@@ -630,6 +657,27 @@ export default function ProjectDetail() {
           </Card>
         </>
       )}
+      {principalSteps.length > 0 && (
+        <>
+          <SectionTitle>Pembayaran Pokok</SectionTitle>
+          <Card className="mb-3.5 !px-4 !py-1">
+            {principalSteps.map((s, i) => (
+              <div key={s.id} className={`py-2.5 ${i < principalSteps.length - 1 ? 'border-b border-line-soft' : ''}`}>
+                <div className="text-[13px] text-ink">{principalStepLabel(project, i)}</div>
+                {i === principalSteps.length - 1 && principalUndo.ok && (
+                  <button
+                    type="button"
+                    onClick={() => setUndoingPrincipal(s.id)}
+                    className="mt-1 text-[12px] font-semibold text-terra active:opacity-70"
+                  >
+                    Batalkan bayar pokok
+                  </button>
+                )}
+              </div>
+            ))}
+          </Card>
+        </>
+      )}
 
       {isActive && (
         <div className="space-y-2 mb-3.5">
@@ -676,6 +724,15 @@ export default function ProjectDetail() {
               Mundurkan pelunasan
             </button>
           )}
+          {principalRules.ok && (
+            <button
+              type="button"
+              onClick={() => setPayingPrincipal(true)}
+              className="w-full py-3 rounded-xl bg-daun-soft text-daun font-semibold text-[14px] active:opacity-80"
+            >
+              Bayar sebagian pokok
+            </button>
+          )}
         </div>
       )}
       {isCompleted && project.settledEarly && (
@@ -702,6 +759,31 @@ export default function ProjectDetail() {
         project={project}
         accounts={accounts}
         onSubmit={(data) => correctCapital(project.id, data)}
+      />
+      <PrincipalPaymentSheet
+        open={payingPrincipal}
+        onClose={() => setPayingPrincipal(false)}
+        project={project}
+        accounts={accounts}
+        onSubmit={(data) => recordPrincipalPayment(project.id, data)}
+      />
+      <ConfirmDialog
+        open={undoingPrincipal !== null}
+        onClose={() => setUndoingPrincipal(null)}
+        onConfirm={async () => {
+          try {
+            await undoPrincipalPayment(project.id, {
+              stepId: undoingPrincipal,
+              seenWriteId: project.lastWriteId ?? null,
+            });
+          } catch (e) {
+            showToast(e.message || 'Gagal membatalkan bayar pokok');
+          }
+        }}
+        title="Batalkan bayar pokok?"
+        message={principalUndoMessage(project, principalUndo, accountName)}
+        confirmLabel="Ya, batalkan"
+        confirmDisabled={!principalUndo.ok}
       />
       <ReceiptManageSheet
         open={managing !== null}
