@@ -1,4 +1,5 @@
 import { rowCarriedIn, rowDue, rowReceived, rowRemaining } from './paymentStatus';
+import { toDate } from './formatDate';
 import { normalizeProject } from './normalizeProject';
 import { principalPaidBefore } from './principalPayment';
 import { calcMonthlyInterest, resolveTiers } from './projectSchedule';
@@ -72,9 +73,15 @@ export function anakFromReceipt(project, receipt) {
   const p = normalizeProject(project);
   const out = empty();
   if (!anakRatio(p) || !receipt) return out;
-  // Money already on each tagihan before this arrival, in the order recorded.
+  // Money already on each tagihan before this arrival, in the order the money
+  // arrived (a payment typed in late still paid when it came), then recorded.
+  const time = (r) => toDate(r?.date)?.getTime() ?? 0;
+  const arrived = (p.receipts || [])
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => time(a.r) - time(b.r) || a.i - b.i)
+    .map(({ r }) => r);
   const before = new Map();
-  for (const r of p.receipts || []) {
+  for (const r of arrived) {
     if (r.id === receipt.id) break;
     for (const a of r.allocations || []) before.set(a.no, (before.get(a.no) || 0) + (Number(a.amount) || 0));
   }

@@ -75,6 +75,18 @@ describe('anakFromReceipt', () => {
     });
   });
 
+  it('lets the money that arrived first pay the tunggakan, whatever order it was typed in', () => {
+    const p = project();
+    p.payments[2] = { ...p.payments[2], closure: { kind: 'carry', amount: 6_500_000, toNo: 4 } };
+    const early = { ...receipt('a', [{ no: 4, amount: 5_000_000 }]), date: due(8) };
+    const late = { ...receipt('b', [{ no: 4, amount: 101_500_000 }]), date: due(9) };
+    const typedLate = { ...p, receipts: [late, early] };
+    expect(anakFromReceipt(typedLate, early)).toEqual({ bagiHasil: 2_272_727, fee: 227_273, pokok: 0, total: 2_272_727 });
+    expect(anakFromReceipt(typedLate, late)).toEqual({
+      bagiHasil: 681_818, fee: 68_182, pokok: 50_000_000, total: 50_681_818,
+    });
+  });
+
   it('gives the son his part of principal paid back early, without fee', () => {
     const p = project({ principalPayments: [{ id: 'pk', amount: 20_000_000, fromNo: 3, at: due(7) }] });
     const r = receipt('pk', [{ no: 4, amount: 20_000_000 }]);

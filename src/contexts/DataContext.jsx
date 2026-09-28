@@ -1300,7 +1300,7 @@ export function DataProvider({ children }) {
           fundingMode: 'rollover',
           rolledFromProjectId: oldProjectId,
           // The son's part carries over with the remainder (spec 2026-09-29).
-          ...(anakRatio(old) > 0
+          ...(Math.round(anakRatio(old) * principalAmount) > 0
             ? {
                 anak: {
                   amount: Math.round(anakRatio(old) * principalAmount),
