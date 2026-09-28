@@ -96,7 +96,7 @@ function rebase(p, oldSteps, newSteps, fromNo) {
       row.ratePct != null && Number.isFinite(stored)
         ? stored
         : oldBase > 0
-          ? ((Number(row.expectedAmount) || 0) * 100) / oldBase
+          ? Number((((Number(row.expectedAmount) || 0) * 100) / oldBase).toFixed(10))
           : 0;
     return { ...row, ratePct: rate, expectedAmount: calcMonthlyInterest(baseOf(p, row.no, newSteps), rate) };
   });
