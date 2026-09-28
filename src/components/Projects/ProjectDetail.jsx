@@ -19,13 +19,13 @@ import CapitalCorrectionSheet from './CapitalCorrectionSheet';
 import PrincipalPaymentSheet from './PrincipalPaymentSheet';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
-import { projectSummary } from '../../utils/projectSchedule';
+import { calcMonthlyInterest, projectSummary } from '../../utils/projectSchedule';
 import { hasAnyReceipt, isSettled, isShort, rowCarriedIn, rowDue, rowReceived, rowRemaining, rowState } from '../../utils/paymentStatus';
 import { applyReopenRemainder } from '../../utils/remainderOps';
 import { currentFinal, extensionOptions, undoCheck } from '../../utils/extension';
 import { rolloverSource } from '../../utils/rollover';
 import { settlementUndoPreview } from '../../utils/settlement';
-import { principalPaymentRules, principalUndoCheck, stepBase } from '../../utils/principalPayment';
+import { principalPaidBefore, principalPaymentRules, principalUndoCheck, stepBase } from '../../utils/principalPayment';
 import {
   IcChevronLeft,
   IcCalendar,
@@ -428,9 +428,12 @@ export default function ProjectDetail() {
   const rTier1 = project.returnPctTier1 != null ? project.returnPctTier1 : project.monthlyReturnPct;
   const rTier2 = project.returnPctTier2 != null ? project.returnPctTier2 : rTier1;
   const isTieredRate = rTier2 !== rTier1 && (project.durationMonths || 0) > 3;
+  // After Bayar sebagian pokok the bagi hasil follow the principal left.
+  const returnBase = (Number(project.principalAmount) || 0) - principalPaidBefore(project, Infinity);
+  const lowered = returnBase < (Number(project.principalAmount) || 0);
   const returnRateLabel = isTieredRate
-    ? `${rTier1}% (bln 1-3) / ${rTier2}% (bln 4+)`
-    : `${rTier1}% · ${formatCurrency((project.principalAmount * rTier1) / 100)}`;
+    ? `${rTier1}% (bln 1-3) / ${rTier2}% (bln 4+)${lowered ? ` · dari sisa pokok ${formatCurrency(returnBase)}` : ''}`
+    : `${rTier1}% · ${formatCurrency(calcMonthlyInterest(returnBase, rTier1))}${lowered ? ' (dari sisa pokok)' : ''}`;
 
   async function handleReceipt(data) {
     const out = await recordReceipt(project.id, data);
