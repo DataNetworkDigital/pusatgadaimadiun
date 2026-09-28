@@ -22,6 +22,7 @@ import { isSettled, isShort, rowCarriedIn, rowDue, rowReceived, rowRemaining, ro
 import { applyReopenRemainder } from '../../utils/remainderOps';
 import { extensionOptions, undoCheck } from '../../utils/extension';
 import { rolloverSource } from '../../utils/rollover';
+import { settlementUndoPreview } from '../../utils/settlement';
 import {
   IcChevronLeft,
   IcCalendar,
@@ -297,11 +298,34 @@ function undoMessage(e) {
     : `Bulan-bulan tambahan dihapus dan sisa pelunasan ${formatCurrency(e.baseAmount)} kembali ditagih di pelunasan lama.`;
 }
 
+// The confirmation for undoing a pelunasan dipercepat, from its preview.
+function settleUndoMessage(preview, accountName) {
+  if (!preview.ok) return preview.why;
+  const label = (r) => (r.type === 'final' ? `pelunasan bulan ${r.no}` : `bulan ${r.no}`);
+  const parts = [
+    `Uang pelunasan ${formatCurrency(preview.amount)} ditarik lagi dari ${accountName(preview.accountId)}.`,
+  ];
+  if (preview.restored.length) {
+    parts.push(
+      `Tagihan yang terhapus waktu pelunasan muncul lagi: ${preview.restored
+        .map((r) => `${label(r)} (${formatCurrency(r.amount)})`)
+        .join(', ')}.`
+    );
+  }
+  if (preview.reopened.length) {
+    parts.push(
+      `${preview.reopened.map((r) => `Sisa bulan ${r.no} (${formatCurrency(r.amount)})`).join(', ')} ditagih lagi.`
+    );
+  }
+  parts.push(preview.status === 'active' ? 'Project aktif lagi.' : 'Project tetap selesai.');
+  return parts.join(' ');
+}
+
 export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDemo } = useDemo();
-  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, deleteProject, updateProject } =
+  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject, updateProject } =
     useData();
   const [managing, setManaging] = useState(null); // a receipt id, or null when closed
   const [remainderNo, setRemainderNo] = useState(null); // a tagihan number, or null when closed
@@ -317,6 +341,7 @@ export default function ProjectDetail() {
   const [askRestFor, setAskRestFor] = useState(null); // a receipt that left the pelunasan partly paid
   const [rollingOver, setRollingOver] = useState(false);
   const [undoingExtension, setUndoingExtension] = useState(null); // an extension id, or null
+  const [undoingSettlement, setUndoingSettlement] = useState(false);
 
   const base = isDemo ? '/demo' : '';
   const project = projects.find((p) => p.id === id);
@@ -335,6 +360,7 @@ export default function ProjectDetail() {
 
   const summary = projectSummary(project);
   const reopen = reopenNo !== null ? reopenPreview(project, reopenNo) : { ok: false, message: '' };
+  const settleUndo = undoingSettlement ? settlementUndoPreview(project) : null;
   const isActive = project.status === 'active';
   const isCompleted = project.status === 'completed';
   const isDefault = project.status === 'default';
@@ -634,6 +660,15 @@ export default function ProjectDetail() {
           )}
         </div>
       )}
+      {isCompleted && project.settledEarly && (
+        <button
+          type="button"
+          onClick={() => setUndoingSettlement(true)}
+          className="w-full py-3 mb-3.5 rounded-xl bg-terra-soft text-terra font-semibold text-[14px] active:opacity-80"
+        >
+          Batalkan pelunasan dipercepat
+        </button>
+      )}
 
       <ProjectForm
         key={`edit-${project.id}`}
@@ -741,6 +776,21 @@ export default function ProjectDetail() {
         title="Batalkan perpanjangan?"
         message={undoMessage(latestExtension)}
         confirmLabel="Ya, batalkan"
+      />
+      <ConfirmDialog
+        open={undoingSettlement}
+        onClose={() => setUndoingSettlement(false)}
+        onConfirm={async () => {
+          try {
+            await undoSettlement(project.id, { seenWriteId: project.lastWriteId ?? null });
+          } catch (e) {
+            showToast(e.message || 'Gagal membatalkan pelunasan');
+          }
+        }}
+        title="Batalkan pelunasan dipercepat?"
+        message={settleUndo ? settleUndoMessage(settleUndo, accountName) : ''}
+        confirmLabel="Ya, batalkan"
+        confirmDisabled={!settleUndo?.ok}
       />
       {rollover.ok && (
         <ProjectForm
