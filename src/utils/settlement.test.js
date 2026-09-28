@@ -477,6 +477,25 @@ describe('applySettlementUndo', () => {
     expect(() => applySettlementUndo(old)).toThrow('tidak bisa dibatalkan otomatis');
   });
 
+  it('refuses to rebuild an old pelunasan on a new contract, whose contract-day row the contract cannot give back', () => {
+    const settled = settledWith(paid(base(), [{ no: 1, amount: 5_500_000 }]), 100_000_000);
+    const old = {
+      ...settled,
+      fundingMode: 'rollover',
+      startDate: new Date(2026, 5, 5),
+      paymentDayOfMonth: 5,
+      durationMonths: 4,
+      returnPctTier1: 5.5,
+      returnPctTier2: 5.5,
+      payments: settled.payments.map((r) => {
+        const row = { ...r };
+        delete row.dropped;
+        return row;
+      }),
+    };
+    expect(() => applySettlementUndo(old)).toThrow('tidak bisa dibatalkan otomatis');
+  });
+
   it('refuses when the pelunasan money also paid another month', () => {
     const settled = settledWith(paid(base(), [{ no: 1, amount: 5_500_000 }]), 100_000_000);
     const odd = {

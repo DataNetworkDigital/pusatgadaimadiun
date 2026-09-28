@@ -188,10 +188,14 @@ const byNo = (a, b) => (Number(a.no) || 0) - (Number(b.no) || 0);
 
 // The rows a pelunasan removed. Kept on its row since 28 Sep 2026; before
 // that they are rebuilt from the contract, which only works while no
-// extension or contract-day row has changed the schedule.
+// extension or contract-day row has changed the schedule. A new contract
+// starts with such a row even when the pelunasan removed it.
 function droppedRows(project, settleRow, left) {
   if (Array.isArray(settleRow.dropped)) return settleRow.dropped;
-  const changed = (project.extensions || []).length > 0 || left.some((r) => r.leadCharge);
+  const changed =
+    project.fundingMode === 'rollover' ||
+    (project.extensions || []).length > 0 ||
+    left.some((r) => r.leadCharge);
   if (changed || !project.startDate) {
     throw new Error(
       'Pelunasan ini dicatat sebelum ada tombol batal dan jadwalnya pernah diubah, jadi tidak bisa dibatalkan otomatis.'
