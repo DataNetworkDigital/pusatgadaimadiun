@@ -16,6 +16,7 @@ import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
 import { applySettlement, applySettlementUndo } from '../utils/settlement';
 import { applyCapitalCorrection, fundingMoves } from '../utils/capitalCorrection';
 import { applyPrincipalPayment, applyPrincipalPaymentUndo, principalPaidBefore } from '../utils/principalPayment';
+import { DEFAULT_ANAK_FEE_PCT, anakRatio, cleanAnak } from '../utils/anakShare';
 import { applyReceiptCancel, applyReceiptEdit, applyReceiptMove } from '../utils/receiptOps';
 import { applyCloseRemainder, applyReopenRemainder } from '../utils/remainderOps';
 import { applyExtension, applyUndoExtension, currentFinal } from '../utils/extension';
@@ -718,6 +719,17 @@ export function DataProvider({ children }) {
     if (changed) toast('Modal dikoreksi');
   }
 
+  // Diambil anak (spec 2026-09-29): which part of a project is the son's. No
+  // money moves; the calendar shows what to transfer to him.
+  async function setProjectAnak(projectId, { anak, seenWriteId } = {}) {
+    const on = await inProjectTransaction(projectId, (t, project, ref, writeId) => {
+      const cleaned = cleanAnak(project, anak);
+      t.update(ref, { anak: cleaned, lastWriteId: writeId });
+      return !!cleaned;
+    }, { seenWriteId });
+    toast(on ? 'Ditandai diambil anak' : 'Tanda diambil anak dilepas');
+  }
+
   // Where money that comes in lands. `account` is either an account id or the
   // string 'cash'. Cash uses the Kas account when the owner has one; otherwise
   // it is created in the same write (`createRef`), so cash on hand still counts
@@ -1287,6 +1299,15 @@ export function DataProvider({ children }) {
           payments,
           fundingMode: 'rollover',
           rolledFromProjectId: oldProjectId,
+          // The son's part carries over with the remainder (spec 2026-09-29).
+          ...(anakRatio(old) > 0
+            ? {
+                anak: {
+                  amount: Math.round(anakRatio(old) * principalAmount),
+                  feePct: old.anak.feePct ?? DEFAULT_ANAK_FEE_PCT,
+                },
+              }
+            : {}),
           fundingTransactionId: null,
           lastWriteId: writeId,
           createdAt: serverTimestamp(),
@@ -1590,7 +1611,7 @@ export function DataProvider({ children }) {
     addTransaction, updateTransaction, deleteTransaction,
     addDebt, updateDebt, deleteDebt, payInstallment,
     addReminder, updateReminder, deleteReminder,
-    addProject, updateProject, correctCapital, recordReceipt, recordPrincipalPayment, undoPrincipalPayment, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject,
+    addProject, updateProject, correctCapital, setProjectAnak, recordReceipt, recordPrincipalPayment, undoPrincipalPayment, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject,
     resetAllData,
   };
 
