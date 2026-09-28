@@ -14,13 +14,13 @@ import { notifyTelegram, syncToDanaTrack } from '../utils/telegram';
 import { allocateReceipt, openRows } from '../utils/allocation';
 import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
 import { applySettlement, applySettlementUndo } from '../utils/settlement';
-import { applyCapitalCorrection } from '../utils/capitalCorrection';
+import { applyCapitalCorrection, fundingMoves } from '../utils/capitalCorrection';
 import { applyReceiptCancel, applyReceiptEdit, applyReceiptMove } from '../utils/receiptOps';
 import { applyCloseRemainder, applyReopenRemainder } from '../utils/remainderOps';
 import { applyExtension, applyUndoExtension, currentFinal } from '../utils/extension';
 import { applyRolloverClose, applyRolloverUndo, rolloverSchedule } from '../utils/rollover';
 import { toDate } from '../utils/formatDate';
-import { isProjectMoney } from '../utils/projectMoney';
+import { isProjectMoney, reversalOf } from '../utils/projectMoney';
 import { formatCurrency } from '../utils/formatCurrency';
 
 const DataContext = createContext(null);
@@ -678,17 +678,9 @@ export function DataProvider({ children }) {
         const snap = txRef ? await t.get(txRef) : null;
         if (snap?.exists()) txWrites.push({ txRef, allocations });
       }
-      const deltas = new Map();
-      const add = (accountId, amount) => {
-        if (accountId) deltas.set(accountId, (deltas.get(accountId) || 0) + amount);
-      };
-      if (moneyChanged) {
-        for (const [accountId, amount] of reversalOf(funding)) add(accountId, amount);
-        add(sourceAccountId, -newDisbursed);
-      }
+      const moves = moneyChanged ? fundingMoves(funding, { disbursedAmount: newDisbursed, sourceAccountId }) : [];
       const accountWrites = [];
-      for (const [accountId, amount] of deltas) {
-        if (!amount) continue;
+      for (const { accountId, amount } of moves) {
         const accRef = doc(db, C('accounts'), accountId);
         const accSnap = await t.get(accRef);
         if (!accSnap.exists()) {
@@ -802,18 +794,6 @@ export function DataProvider({ children }) {
     } catch (e) {
       throw friendlyWriteError(e, reachedCommit);
     }
-  }
-
-  // What deleting a transaction does to balances, as deleteTransaction would
-  // undo it: the money goes back where it came from, whatever the Transaksi
-  // page may have turned the transaction into. [accountId, delta] pairs.
-  function reversalOf(tx) {
-    const amt = Number(tx?.amount) || 0;
-    if (!amt) return [];
-    if (tx.type === 'income') return [[tx.toAccount, -amt]];
-    if (tx.type === 'expense') return [[tx.fromAccount, amt]];
-    if (tx.type === 'transfer') return [[tx.fromAccount, amt], [tx.toAccount, -amt]];
-    return [];
   }
 
   // Firestore's own errors are English and technical. The owner gets one that

@@ -16,3 +16,15 @@ export function isProjectMoney(tx, projects, projectsLoaded) {
   if (!projectsLoaded) return true;
   return !!projectOfTransaction(tx, projects);
 }
+
+// What deleting a transaction does to balances, as deleteTransaction would
+// undo it: the money goes back where it came from, whatever the Transaksi
+// page may have turned the transaction into. [accountId, delta] pairs.
+export function reversalOf(tx) {
+  const amt = Number(tx?.amount) || 0;
+  if (!amt) return [];
+  if (tx.type === 'income') return [[tx.toAccount, -amt]];
+  if (tx.type === 'expense') return [[tx.fromAccount, amt]];
+  if (tx.type === 'transfer') return [[tx.fromAccount, amt], [tx.toAccount, -amt]];
+  return [];
+}

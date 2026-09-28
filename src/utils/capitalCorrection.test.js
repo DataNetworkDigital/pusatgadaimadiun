@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { applyCapitalCorrection, capitalCorrectionRules } from './capitalCorrection';
+import { applyCapitalCorrection, capitalCorrectionRules, fundingMoves } from './capitalCorrection';
 import { rowRemaining, rowState } from './paymentStatus';
+import { applyReceiptMove } from './receiptOps';
 
 const due = (month) => new Date(2026, month, 5);
 // Three bagi hasil at 5,5% and the pelunasan, for a given Nilai Project.
@@ -197,5 +198,151 @@ describe('applyCapitalCorrection', () => {
     });
     const { update } = correct(p, { principalAmount: 120_000_000 });
     expect(update).toMatchObject({ status: 'active', closedAt: null });
+  });
+});
+
+describe('applyCapitalCorrection after review', () => {
+  // Applies a correction and returns the project as it is stored afterwards.
+  const corrected = (p, principalAmount) => ({ ...p, ...correct(p, { principalAmount }).update });
+
+  it('never spills a moved old payment onto a month an old confirmation paid', () => {
+    // Bulan 1 and 3 confirmed the old way; bulan 1's payment was then moved
+    // to bulan 2 (Pindah).
+    const p = project({
+      receipts: [
+        { ...receipt('legacy-1', 5_500_000, [{ no: 2, amount: 5_500_000 }]), moved: true },
+        receipt('legacy-3', 5_500_000, [{ no: 3, amount: 5_500_000 }]),
+      ],
+    });
+    const { update } = correct(p, { principalAmount: 80_000_000 });
+    expect(update.receipts.map((r) => r.id)).toEqual(['legacy-1', 'legacy-3']);
+    expect(update.receipts[0].allocations).toEqual([
+      { no: 2, amount: 4_400_000 },
+      { no: 4, amount: 1_100_000 },
+    ]);
+    expect(rowRemaining({ ...p, ...update }, row(update, 4))).toBe(78_900_000);
+  });
+
+  it('never spills a reopened old payment onto a month an old confirmation paid', () => {
+    const p = project({
+      receipts: [
+        { ...receipt('legacy-1', 5_000_000, [{ no: 1, amount: 5_000_000 }]), reopened: true },
+        receipt('legacy-2', 5_500_000, [{ no: 2, amount: 5_500_000 }]),
+      ],
+    });
+    const { update } = correct(p, { principalAmount: 80_000_000 });
+    expect(update.receipts[0].allocations).toEqual([
+      { no: 1, amount: 4_400_000 },
+      { no: 3, amount: 600_000 },
+    ]);
+  });
+
+  it('puts every payment back where it was when the correction is corrected back', () => {
+    const p = project({
+      principalAmount: 200_000_000,
+      payments: rowsAt(200_000_000),
+      receipts: [
+        receipt('r1', 11_000_000, [{ no: 1, amount: 11_000_000 }]),
+        receipt('r2', 11_000_000, [{ no: 2, amount: 11_000_000 }]),
+      ],
+    });
+    const down = corrected(p, 100_000_000);
+    expect(down.receipts[1]).toMatchObject({ forNo: 2, allocations: [{ no: 3, amount: 5_500_000 }, { no: 4, amount: 5_500_000 }] });
+    const back = corrected(down, 200_000_000);
+    expect(back.receipts).toEqual(p.receipts);
+  });
+
+  it('keeps a month paid in several small payments paid after a round trip', () => {
+    const p = project({
+      principalAmount: 50_000_000,
+      payments: rowsAt(50_000_000),
+      receipts: [
+        receipt('a', 2_584_439, [{ no: 1, amount: 2_584_439 }]),
+        receipt('b', 156_137, [{ no: 1, amount: 156_137 }]),
+        receipt('c', 9_424, [{ no: 1, amount: 9_424 }]),
+      ],
+    });
+    const back = corrected(corrected(p, 40_000_000), 50_000_000);
+    expect(back.receipts).toEqual(p.receipts);
+    expect(rowState(back, back.payments[0])).toBe('lunas');
+  });
+
+  it('forgets the month a correction remembered once the owner moves the payment', () => {
+    const p = project({
+      receipts: [
+        receipt('r1', 5_500_000, [{ no: 1, amount: 5_500_000 }]),
+        { ...receipt('r2', 5_500_000, [{ no: 3, amount: 5_500_000 }]), forNo: 2 },
+      ],
+    });
+    const { update } = applyReceiptMove(p, 'r2', 2);
+    expect(update.receipts[1]).not.toHaveProperty('forNo');
+  });
+
+  it('dates a project it completes by the last money that arrived', () => {
+    const p = project({
+      principalAmount: 110_000_000,
+      payments: rowsAt(110_000_000),
+      receipts: [
+        receipt('r1', 5_500_000, [{ no: 1, amount: 5_500_000 }]),
+        receipt('r2', 5_500_000, [{ no: 2, amount: 5_500_000 }]),
+        receipt('r3', 5_500_000, [{ no: 3, amount: 5_500_000 }]),
+        { ...receipt('r4', 100_000_000, [{ no: 4, amount: 100_000_000 }]), date: due(9) },
+      ],
+    });
+    const { update } = correct(p, { principalAmount: 100_000_000 });
+    expect(update).toMatchObject({ status: 'completed', closedAt: due(9) });
+  });
+
+  it('gives an old row its exact amount back after a round trip, and keeps its rate', () => {
+    const p = project({
+      principalAmount: 60_000_000,
+      payments: [
+        { no: 1, type: 'interest', dueDate: due(6), expectedAmount: 3_031_575, ratePct: null, receivedAmount: null },
+        { no: 2, type: 'final', dueDate: due(7), expectedAmount: 60_000_000, ratePct: null, receivedAmount: null },
+      ],
+    });
+    const back = corrected(corrected(p, 54_000_000), 60_000_000);
+    expect(back.payments[0]).toMatchObject({ expectedAmount: 3_031_575, ratePct: 5.052625 });
+  });
+
+  it('says when an old confirmation leaves more of its tagihan forgiven', () => {
+    const p = project({ receipts: [receipt('legacy-4', 100_000_000, [{ no: 4, amount: 100_000_000 }])] });
+    const { rows } = correct(p, { principalAmount: 120_000_000 });
+    expect(rows.find((r) => r.no === 4)).toMatchObject({ waivedBefore: 0, waivedAfter: 20_000_000, stateAfter: 'lunas' });
+  });
+
+  it('names a payment that is on no month at all', () => {
+    const p = project({ receipts: [{ ...receipt('r1', 5_500_000, []) }] });
+    expect(() => correct(p, { principalAmount: 80_000_000 })).toThrow('tidak tercatat di bulan mana pun');
+  });
+});
+
+describe('fundingMoves', () => {
+  const funding = { type: 'expense', amount: 9_400_000, fromAccount: 'bca', toAccount: null };
+
+  it('moves what the funding transaction holds, not what the project says', () => {
+    expect(fundingMoves(funding, { disbursedAmount: 9_000_000, sourceAccountId: 'bca' })).toEqual([
+      { accountId: 'bca', amount: 400_000 },
+    ]);
+  });
+
+  it('gives the modal back to one account and takes it from another', () => {
+    expect(fundingMoves(funding, { disbursedAmount: 9_000_000, sourceAccountId: 'bri' })).toEqual([
+      { accountId: 'bca', amount: 9_400_000 },
+      { accountId: 'bri', amount: -9_000_000 },
+    ]);
+  });
+
+  it('reverses a funding transaction the Transaksi page turned into a transfer', () => {
+    const transfer = { type: 'transfer', amount: 9_000_000, fromAccount: 'bca', toAccount: 'kas' };
+    expect(fundingMoves(transfer, { disbursedAmount: 9_000_000, sourceAccountId: 'bca' })).toEqual([
+      { accountId: 'kas', amount: -9_000_000 },
+    ]);
+  });
+
+  it('leaves out an account that is gone', () => {
+    expect(
+      fundingMoves(funding, { disbursedAmount: 9_000_000, sourceAccountId: 'bri' }, (id) => id !== 'bca')
+    ).toEqual([{ accountId: 'bri', amount: -9_000_000 }]);
   });
 });

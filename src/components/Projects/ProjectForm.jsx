@@ -269,6 +269,9 @@ export default function ProjectForm({ open, onClose, onSubmit, accounts, initial
         {scheduleLocked && (
           <div className="bg-emas-soft border border-emas/30 rounded-xl p-3 text-[12px] text-ink-soft leading-snug">
             {scheduleLockMessage}
+            {capitalLocked &&
+              !noAccount &&
+              ' Modal keluar dan rekening sumber dibetulkan lewat tombol Koreksi modal di halaman project.'}
           </div>
         )}
         <div>

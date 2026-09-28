@@ -290,6 +290,9 @@ export function applyReceiptMove(project, receiptId, startNoInput) {
   }
   // A moved old payment is no longer a confirmation of its old tagihan.
   const moved = { ...receipt, allocations, ...(isLegacy(receipt) ? { moved: true } : {}) };
+  // The owner has said which month it is for now: a month a Koreksi modal
+  // remembered for it no longer holds.
+  delete moved.forNo;
   const receipts = (p.receipts || []).map((r) => (r.id === receipt.id ? moved : r));
   return { update: finish(p, base.payments, receipts, receipt.date), allocations };
 }

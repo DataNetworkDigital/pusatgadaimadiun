@@ -3,21 +3,10 @@ import Modal from '../common/Modal';
 import CurrencyInput from '../common/CurrencyInput';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { calcMonthlyInterest, resolveTiers } from '../../utils/projectSchedule';
-import { applyCapitalCorrection, capitalCorrectionRules } from '../../utils/capitalCorrection';
+import { applyCapitalCorrection, capitalCorrectionRules, fundingMoves } from '../../utils/capitalCorrection';
+import { useData } from '../../contexts/DataContext';
 
 const STATE_LABEL = { lunas: 'Lunas', kurang: 'Kurang', belum: 'Belum dibayar' };
-
-// What the correction does to balances, one line per account, as the writer
-// does it from the funding transaction (which says what the project says).
-function moneyMoves(project, disbursed, accountId) {
-  const deltas = new Map();
-  const add = (id, amount) => {
-    if (id) deltas.set(id, (deltas.get(id) || 0) + amount);
-  };
-  add(project.sourceAccountId, Number(project.disbursedAmount) || 0);
-  add(accountId, -(Number(disbursed) || 0));
-  return [...deltas].filter(([, amount]) => amount !== 0).map(([id, amount]) => ({ accountId: id, amount }));
-}
 
 // Koreksi modal (spec 2026-09-28 §4): for a Nilai Project, Modal Keluar or
 // Rekening Sumber typed wrong after money has arrived. The owner sees every
@@ -33,9 +22,11 @@ function CorrectionForm({ onClose, project, accounts, onSubmit }) {
   const [accountId, setAccountId] = useState(project.sourceAccountId || '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  // The version of the project the preview was made from; the save is
-  // refused if the project has been written since.
-  const seenWriteId = project.lastWriteId ?? null;
+  // The version of the project this sheet opened on. The form keeps what the
+  // owner typed, so a correction another device saves meanwhile must refuse
+  // this one rather than be quietly undone by it.
+  const [seenWriteId] = useState(() => project.lastWriteId ?? null);
+  const { transactions, loading } = useData();
 
   const rules = capitalCorrectionRules(project);
   const { tier1 } = resolveTiers(project);
@@ -52,9 +43,22 @@ function CorrectionForm({ onClose, project, accounts, onSubmit }) {
       return { error: e.message };
     }
   }, [project, principal, disbursed, accountId]);
-  const changedRows = (preview.rows || []).filter((r) => r.before !== r.after || r.stateBefore !== r.stateAfter);
+  const changedRows = (preview.rows || []).filter(
+    (r) => r.before !== r.after || r.stateBefore !== r.stateAfter || r.waivedAfter > r.waivedBefore
+  );
   const nothing = !preview.error && Object.keys(preview.update || {}).length === 0;
-  const money = preview.error ? [] : moneyMoves(project, disbursed, accountId);
+  // Balances move as the funding transaction says, which is what the writer
+  // reverses; the preview reads the same transaction so it says the same.
+  const moneyChange =
+    !!preview.update && (preview.update.disbursedAmount !== undefined || preview.update.sourceAccountId !== undefined);
+  const funding = (transactions || []).find((t) => t.id === project.fundingTransactionId) || null;
+  const fundingMissing = moneyChange && !loading && !funding;
+  const money =
+    moneyChange && funding
+      ? fundingMoves(funding, { disbursedAmount: disbursed, sourceAccountId: accountId }, (id) =>
+          (accounts || []).some((a) => a.id === id)
+        )
+      : [];
   const accountName = (id) => accounts?.find((a) => a.id === id)?.name || 'rekening lama';
 
   async function submit() {
@@ -80,7 +84,7 @@ function CorrectionForm({ onClose, project, accounts, onSubmit }) {
         <button
           type="button"
           className="btn-primary w-full"
-          disabled={submitting || !rules.ok || !!preview.error || nothing}
+          disabled={submitting || !rules.ok || !!preview.error || nothing || (moneyChange && (loading || !funding))}
           onClick={submit}
         >
           {submitting ? 'Menyimpan…' : 'Simpan koreksi'}
@@ -118,6 +122,12 @@ function CorrectionForm({ onClose, project, accounts, onSubmit }) {
               ))}
             </select>
           </div>
+          {fundingMissing && (
+            <p className="text-[13px] text-terra leading-snug">
+              Transaksi pendanaan project ini tidak ditemukan, jadi modal keluar dan rekening sumber tidak bisa
+              dikoreksi.
+            </p>
+          )}
           {preview.error ? (
             <p className="text-[13px] text-terra leading-snug">{preview.error}</p>
           ) : (
@@ -130,6 +140,9 @@ function CorrectionForm({ onClose, project, accounts, onSubmit }) {
                     <span className="font-num text-ink text-right">
                       {formatCurrency(r.before)} → {formatCurrency(r.after)}
                       {r.stateBefore !== r.stateAfter ? `, jadi ${STATE_LABEL[r.stateAfter]}` : ''}
+                      {r.waivedAfter > r.waivedBefore
+                        ? `, kurang ${formatCurrency(r.waivedAfter)} dianggap lunas (pembayaran lama)`
+                        : ''}
                     </span>
                   </div>
                 ))}
