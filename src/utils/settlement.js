@@ -125,6 +125,8 @@ export function applySettlement(project, { amount, at, accountId, transactionId 
   const p = normalizeProject(project);
 
   const keptRows = (p.payments || []).filter((row) => keptOnSettlement(p, row));
+  // What the pelunasan removes stays on its own row, so it can be undone.
+  const dropped = (p.payments || []).filter((row) => !keptOnSettlement(p, row));
   const keptNos = new Set(keptRows.map((row) => row.no));
   const kept = keptRows.map((row) => {
     // A tunggakan carried onto a tagihan the pelunasan drops is closed by the
@@ -133,9 +135,12 @@ export function applySettlement(project, { amount, at, accountId, transactionId 
     // otherwise (the owner's rule never charges a later untouched month).
     // Left as a carry it would point at a row that is gone, and the
     // pelunasan, numbered after the kept rows, could take that number and ask
-    // for the tunggakan again.
+    // for the tunggakan again. The carry is kept for an undo.
     if (row.closure?.kind === 'carry' && !keptNos.has(row.closure.toNo)) {
-      return { ...row, closure: { kind: 'waive', amount: row.closure.amount, reason: 'settlement', at } };
+      return {
+        ...row,
+        closure: { kind: 'waive', amount: row.closure.amount, reason: 'settlement', at, replaced: row.closure },
+      };
     }
     // A tagihan he had started paying is closed by the pelunasan, which is
     // what the suggestion charged for. A row that already carries a closure
@@ -158,6 +163,7 @@ export function applySettlement(project, { amount, at, accountId, transactionId 
     transactionId,
     accountId,
     settledEarly: true,
+    dropped,
   };
 
   const receipt = {

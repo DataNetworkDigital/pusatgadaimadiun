@@ -100,6 +100,7 @@ describe('applySettlement', () => {
       transactionId: 'tx-s',
       accountId: 'bca',
       settledEarly: true,
+      dropped: p.payments.filter((r) => r.no !== 1),
     });
   });
 
@@ -273,6 +274,19 @@ describe('settling after a tunggakan was carried', () => {
     const after = settle(p0, settlementSuggestion(p0, today).amount);
     expect(after.payments.find((r) => r.no === 2).closure.kind).toBe('carry');
     expect(after.payments.every((r) => isSettled(after, r))).toBe(true);
+  });
+
+  it('keeps the carry it closes, so an undo can give it back', () => {
+    const p = carried(paid(base(), [{ no: 1, amount: 5_500_000 }]), 2, 3, 5_500_000);
+    const out = applySettlement(p, { amount: 105_500_000, at, accountId: 'bca', transactionId: 'tx-s' });
+    expect(out.payments.find((r) => r.no === 2).closure).toEqual({
+      kind: 'waive',
+      amount: 5_500_000,
+      reason: 'settlement',
+      at,
+      replaced: { kind: 'carry', amount: 5_500_000, toNo: 3 },
+    });
+    expect(out.payments.find((r) => r.settledEarly).dropped.map((r) => r.no)).toEqual([3, 4]);
   });
 });
 
