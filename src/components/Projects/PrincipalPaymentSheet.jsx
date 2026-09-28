@@ -33,6 +33,14 @@ function PrincipalForm({ onClose, project, accounts, onSubmit }) {
     const no = defaultStepMonth(rules.months, new Date());
     return no == null ? '' : String(no);
   });
+  // The month follows the payment date until the owner picks one himself.
+  const [monthPicked, setMonthPicked] = useState(false);
+  function changeDate(value) {
+    setDate(value);
+    if (monthPicked) return;
+    const no = defaultStepMonth(rules.months, fromDateInput(value));
+    setFromNo(no == null ? '' : String(no));
+  }
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -118,11 +126,18 @@ function PrincipalForm({ onClose, project, accounts, onSubmit }) {
           </div>
           <div>
             <label className="label-text">Tanggal diterima</label>
-            <DateField value={date} onChange={setDate} />
+            <DateField value={date} onChange={changeDate} />
           </div>
           <div>
             <label className="label-text">Bagi hasil ikut pokok baru mulai</label>
-            <select className="input-field" value={fromNo} onChange={(e) => setFromNo(e.target.value)}>
+            <select
+              className="input-field"
+              value={fromNo}
+              onChange={(e) => {
+                setFromNo(e.target.value);
+                setMonthPicked(true);
+              }}
+            >
               {rules.months.map((r) => (
                 <option key={r.no} value={r.no}>
                   Bulan {r.no} · jatuh tempo {formatDate(r.dueDate, { short: true })}

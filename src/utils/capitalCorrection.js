@@ -130,7 +130,12 @@ function replay(p, oldPrincipal, newPrincipal, paidBefore = () => 0) {
     const from = openRows(state).find((r) => r.no >= forNo);
     const split = from ? allocateReceipt(state, amount, from.no) : { allocations: [], leftover: amount };
     if (!split.allocations.length || split.leftover > 0) {
-      throw new Error(`${where} tidak muat di tagihan yang baru. Batalkan atau edit dulu pembayaran itu, lalu koreksi modal.`);
+      const step = (p.principalPayments || []).some((s) => s.id === receipt.id);
+      throw new Error(
+        step
+          ? `${where} (bayar sebagian pokok) tidak muat di tagihan yang baru. Batalkan dulu bayar pokok itu, lalu koreksi modal.`
+          : `${where} tidak muat di tagihan yang baru. Batalkan atau edit dulu pembayaran itu, lalu koreksi modal.`
+      );
     }
     const next = { ...receipt, allocations: split.allocations };
     if (split.allocations[0].no === forNo) delete next.forNo;

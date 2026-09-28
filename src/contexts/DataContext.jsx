@@ -15,7 +15,7 @@ import { allocateReceipt, openRows } from '../utils/allocation';
 import { findCashAccount, CASH_ACCOUNT_NAME } from '../utils/cashAccount';
 import { applySettlement, applySettlementUndo } from '../utils/settlement';
 import { applyCapitalCorrection, fundingMoves } from '../utils/capitalCorrection';
-import { applyPrincipalPayment, applyPrincipalPaymentUndo } from '../utils/principalPayment';
+import { applyPrincipalPayment, applyPrincipalPaymentUndo, principalPaidBefore } from '../utils/principalPayment';
 import { applyReceiptCancel, applyReceiptEdit, applyReceiptMove } from '../utils/receiptOps';
 import { applyCloseRemainder, applyReopenRemainder } from '../utils/remainderOps';
 import { applyExtension, applyUndoExtension, currentFinal } from '../utils/extension';
@@ -583,6 +583,7 @@ export function DataProvider({ children }) {
             durationMonths: newDuration,
             startDate: newStart,
             paymentDayOfMonth: newDay,
+            paidBefore: (no) => principalPaidBefore(project, no),
           });
           if (data.principalAmount !== undefined) update.principalAmount = newPrincipal;
           if (data.returnPctTier1 !== undefined || data.monthlyReturnPct !== undefined) {

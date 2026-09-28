@@ -11,6 +11,9 @@ import { rowRemaining } from './paymentStatus';
 import { receiptBlock } from './receiptOps';
 import { applyCapitalCorrection } from './capitalCorrection';
 import { settlementSuggestion } from './settlement';
+import { recomputeUnpaidSchedule } from './projectSchedule';
+import { rolloverSource } from './rollover';
+import { principalPaidBefore } from './principalPayment';
 
 const due = (month) => new Date(2026, month, 5);
 // Nilai 100jt at 5,5% for five months: four bagi hasil of 5,5jt and the pelunasan.
@@ -185,5 +188,68 @@ describe('a principal payment elsewhere in the app', () => {
   it('is taken off the pelunasan dipercepat suggestion', () => {
     // Modal keluar 94,5jt + bagi hasil bulan ini 4,4jt − pokok 20jt yang sudah masuk.
     expect(settlementSuggestion(stepped(), due(7)).amount).toBe(78_900_000);
+  });
+});
+
+describe('a principal payment after review', () => {
+  const stepped = () => {
+    const p = paidTwo();
+    return merged(p, pay(p).update);
+  };
+  const rebuild = (p, over = {}) =>
+    recomputeUnpaidSchedule(p.payments, {
+      principalAmount: p.principalAmount,
+      returnPctTier1: 5.5,
+      returnPctTier2: 5.5,
+      durationMonths: 5,
+      startDate: new Date(2026, 5, 5),
+      paymentDayOfMonth: 5,
+      paidBefore: (no) => principalPaidBefore(p, no),
+      ...over,
+    });
+
+  it('survives an Edit Project save, which rebuilds the untouched months', () => {
+    expect(rebuild(stepped()).map((r) => r.expectedAmount)).toEqual([
+      5_500_000, 5_500_000, 4_400_000, 4_400_000, 100_000_000,
+    ]);
+  });
+
+  it('keeps the lower base when Edit Project changes the rate', () => {
+    const rows = rebuild(stepped(), { returnPctTier1: 6, returnPctTier2: 6 });
+    expect(rows.map((r) => r.expectedAmount)).toEqual([5_500_000, 5_500_000, 4_800_000, 4_800_000, 100_000_000]);
+  });
+
+  it('does not make the day of a principal payment the day of a Kontrak baru', () => {
+    const p = stepped();
+    const allPaid = {
+      ...p,
+      receipts: [
+        ...p.receipts,
+        receipt('r3', 4_400_000, [{ no: 3, amount: 4_400_000 }], due(8)),
+        receipt('r4', 4_400_000, [{ no: 4, amount: 4_400_000 }], due(9)),
+      ],
+    };
+    expect(rolloverSource(allPaid).startDate).toEqual(due(10));
+  });
+
+  it('says why the undo is refused on a project that is no longer active', () => {
+    const p = { ...stepped(), status: 'completed' };
+    expect(principalUndoCheck(p).why).toContain('tidak aktif');
+    expect(principalUndoCheck({ ...p, settledEarly: true }).why).toContain('Batalkan dulu pelunasannya');
+  });
+
+  it('points Koreksi modal to undoing the principal payment that no longer fits', () => {
+    const p0 = project({
+      principalAmount: 5_000_000,
+      payments: [
+        { no: 1, type: 'interest', dueDate: due(6), expectedAmount: 275_000, ratePct: 5.5, receivedAmount: null },
+        { no: 2, type: 'final', dueDate: due(7), expectedAmount: 5_000_000, ratePct: null, receivedAmount: null },
+      ],
+      receipts: [receipt('r0', 1_500_000, [{ no: 2, amount: 1_500_000 }])],
+    });
+    const p = merged(p0, pay(p0, { amount: 2_000_000, fromNo: null }).update);
+    expect(() =>
+      applyCapitalCorrection(p, { principalAmount: 3_000_000, disbursedAmount: 94_500_000, sourceAccountId: 'bca', at: due(8) })
+    ).toThrow('Batalkan dulu bayar pokok');
   });
 });

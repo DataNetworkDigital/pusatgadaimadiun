@@ -144,9 +144,8 @@ export function principalUndoCheck(project) {
   const step = steps[steps.length - 1] || null;
   const refuse = (why) => ({ ok: false, why, step, receipt: null });
   if (!step) return refuse('Belum ada pembayaran pokok.');
-  if (p.status !== 'active' || p.settledEarly) {
-    return refuse('Project ini sudah ditutup. Batalkan dulu pelunasannya.');
-  }
+  if (p.settledEarly) return refuse('Project ini ditutup lewat pelunasan dipercepat. Batalkan dulu pelunasannya.');
+  if (p.status !== 'active') return refuse('Project ini sudah tidak aktif, jadi pembayaran pokoknya tidak bisa dibatalkan.');
   if ((p.extensions || []).length) return refuse('Batalkan dulu perpanjangannya.');
   const receipt = (p.receipts || []).find((r) => r.id === step.id) || null;
   if (!receipt) return refuse('Uang pembayaran pokok ini tidak ditemukan.');

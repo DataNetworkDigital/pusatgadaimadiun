@@ -32,12 +32,17 @@ export function rolloverSource(project) {
   if (open) {
     return { ok: false, why: `Tagihan bulan ${open.no} belum lunas. Selesaikan dulu sebelum membuat kontrak baru.` };
   }
-  // The contract day defaults to the day the latest part of the pelunasan arrived.
-  const startDate = (p.receipts || [])
-    .filter((r) => (r.allocations || []).some((a) => a.no === final.no))
-    .map((r) => toDate(r.date))
-    .filter(Boolean)
-    .reduce((latest, d) => (!latest || d > latest ? d : latest), null);
+  // The contract day defaults to the day the latest part of the pelunasan
+  // arrived. A principal paid back early (Bayar sebagian pokok) came months
+  // before the contract ended, so it does not count; without other money on
+  // the pelunasan the contract day is the pelunasan's own due date.
+  const steps = new Set((p.principalPayments || []).map((s) => s.id));
+  const startDate =
+    (p.receipts || [])
+      .filter((r) => !steps.has(r.id) && (r.allocations || []).some((a) => a.no === final.no))
+      .map((r) => toDate(r.date))
+      .filter(Boolean)
+      .reduce((latest, d) => (!latest || d > latest ? d : latest), null) ?? toDate(final.dueDate);
   return { ok: true, why: null, amount, final, startDate };
 }
 

@@ -62,6 +62,9 @@ export function recomputeUnpaidSchedule(existingPayments, {
   durationMonths,
   startDate,
   paymentDayOfMonth,
+  // Principal paid back early before month `no` (Bayar sebagian pokok): a
+  // bagi hasil is regenerated on what is left, never on the full principal.
+  paidBefore = () => 0,
 }) {
   const principal = Number(principalAmount) || 0;
   const { tier1, tier2 } = resolveTiers({ returnPctTier1, returnPctTier2, monthlyReturnPct });
@@ -117,7 +120,7 @@ export function recomputeUnpaidSchedule(existingPayments, {
     const isLast = i === months;
     const due = pickPaymentDate(start.getFullYear(), start.getMonth() + i, day);
     const ratePct = rateForMonth(i, tier1, tier2);
-    const interest = calcMonthlyInterest(principal, ratePct);
+    const interest = calcMonthlyInterest(principal - (Number(paidBefore(i)) || 0), ratePct);
     const existingPaid = paidByNo.get(i);
     if (existingPaid) {
       payments.push({

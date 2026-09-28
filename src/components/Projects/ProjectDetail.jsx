@@ -331,7 +331,7 @@ function principalStepLabel(project, index) {
   const head = `Pokok dibayar ${formatCurrency(s.amount)} pada ${formatDate(s.at)}.`;
   return s.fromNo == null
     ? `${head} Bagi hasil tetap.`
-    : `${head} Bagi hasil mulai bulan ${s.fromNo} dari sisa pokok ${formatCurrency(stepBase(project, index))}.`;
+    : `${head} Bagi hasil mulai bulan ${s.fromNo} dihitung dari ${formatCurrency(stepBase(project, index))}.`;
 }
 
 // The confirmation for undoing the latest early principal payment.
@@ -404,6 +404,10 @@ export default function ProjectDetail() {
   const principalRules = principalPaymentRules(project);
   const principalSteps = project.principalPayments || [];
   const principalUndo = principalSteps.length ? principalUndoCheck(project) : { ok: false, why: '' };
+  const pelunasanLeft = (() => {
+    const final = currentFinal(project);
+    return final ? rowRemaining(project, final) : 0;
+  })();
   const rollover = rolloverSource(project);
   // Asked once the screen shows the payment that left the pelunasan partly
   // paid (spec 7.2).
@@ -675,6 +679,10 @@ export default function ProjectDetail() {
                 )}
               </div>
             ))}
+            <div className="py-2.5 border-t border-line-soft text-[13px] text-ink-soft flex justify-between">
+              <span>Pelunasan tinggal</span>
+              <span className="font-num font-semibold text-ink">{formatCurrency(pelunasanLeft)}</span>
+            </div>
           </Card>
         </>
       )}
