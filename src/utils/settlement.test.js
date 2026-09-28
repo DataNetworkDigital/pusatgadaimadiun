@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { applySettlement, applySettlementUndo, settlementSuggestion, settlementUndoPreview } from './settlement';
 import { applyExtension } from './extension';
 import { isSettled, projectReceivedTotal, rowRemaining } from './paymentStatus';
-import { deriveRowFields } from './receiptOps';
+import { applyReceiptEdit, deriveRowFields } from './receiptOps';
 import { toDate } from './formatDate';
 
 // Nilai project 100jt, modal keluar 94,5jt (one month of 5,5% taken up front),
@@ -386,6 +386,19 @@ describe('applySettlementUndo', () => {
     const p = carriedOnto(paid(base(), [{ no: 1, amount: 5_500_000 }]), 2, 3, 5_500_000);
     const { update } = applySettlementUndo(settledWith(p, 105_500_000));
     expect(update.payments).toEqual(asStored(p));
+  });
+
+  it('still gives a carried tunggakan back after a payment on its month was edited', () => {
+    // Bulan 2 got 2jt and the rest (3,5jt) was carried onto bulan 3, which the
+    // pelunasan dropped. Then the 2jt was corrected to 3jt.
+    const p = carriedOnto(paid(base(), [{ no: 1, amount: 5_500_000 }, { no: 2, amount: 2_000_000 }]), 2, 3, 3_500_000);
+    const settled = settledWith(p, 103_500_000);
+    const { update: edit } = applyReceiptEdit(settled, 'tx-2', { amount: 3_000_000, at: due(7), accountId: 'bca' });
+    const edited = { ...settled, ...edit };
+    const { update } = applySettlementUndo(edited);
+    expect(update.payments.find((r) => r.no === 2).closure).toEqual({ kind: 'carry', amount: 2_500_000, toNo: 3 });
+    const after = { ...edited, ...update };
+    expect(rowRemaining(after, after.payments.find((r) => r.no === 3))).toBe(8_000_000);
   });
 
   it('removes an edited pelunasan whole', () => {

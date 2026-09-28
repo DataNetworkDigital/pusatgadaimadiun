@@ -227,7 +227,19 @@ export function applyReceiptEdit(project, receiptId, { amount, at, accountId }) 
       return { ...row, closure: { kind: 'waive', amount: gap, reason: 'legacy' } };
     }
     if (p.settledEarly && !row.settledEarly) {
-      return { ...row, closure: { kind: 'waive', amount: gap, reason: 'settlement', at: p.closedAt ?? null } };
+      // A carry the pelunasan closed stays known, so undoing the pelunasan
+      // can still give it back.
+      const replaced = (p.payments || []).find((r) => r.no === row.no)?.closure?.replaced;
+      return {
+        ...row,
+        closure: {
+          kind: 'waive',
+          amount: gap,
+          reason: 'settlement',
+          at: p.closedAt ?? null,
+          ...(replaced ? { replaced } : {}),
+        },
+      };
     }
     return row;
   });
