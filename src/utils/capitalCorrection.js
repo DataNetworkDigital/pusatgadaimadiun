@@ -4,6 +4,7 @@ import { normalizeProject } from './normalizeProject';
 import { statusChange } from './projectStatus';
 import { calcMonthlyInterest } from './projectSchedule';
 import { deriveRowFields, isLegacy } from './receiptOps';
+import { principalPaidBefore } from './principalPayment';
 import { formatCurrency } from './formatCurrency';
 import { formatDate, toDate } from './formatDate';
 import { reversalOf } from './projectMoney';
@@ -193,7 +194,11 @@ export function applyCapitalCorrection(project, { principalAmount, disbursedAmou
   let moved = [];
   if (newPrincipal !== oldPrincipal) {
     if (!rules.principal.ok) throw new Error(rules.principal.why);
-    const out = replay(p, oldPrincipal, newPrincipal);
+    const stepsPaid = (p.principalPayments || []).reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
+    if (newPrincipal <= stepsPaid) {
+      throw new Error(`Nilai Project harus lebih besar dari pokok yang sudah dibayar (${formatCurrency(stepsPaid)}).`);
+    }
+    const out = replay(p, oldPrincipal, newPrincipal, (no) => principalPaidBefore(p, no));
     moved = out.moved;
     update.principalAmount = newPrincipal;
     update.payments = out.payments;

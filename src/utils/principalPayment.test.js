@@ -8,6 +8,9 @@ import {
   stepBase,
 } from './principalPayment';
 import { rowRemaining } from './paymentStatus';
+import { receiptBlock } from './receiptOps';
+import { applyCapitalCorrection } from './capitalCorrection';
+import { settlementSuggestion } from './settlement';
 
 const due = (month) => new Date(2026, month, 5);
 // Nilai 100jt at 5,5% for five months: four bagi hasil of 5,5jt and the pelunasan.
@@ -152,5 +155,35 @@ describe('undoing the latest principal payment', () => {
     const second = merged(first, pay(first, { amount: 10_000_000, transactionId: 'pk2', fromNo: 4 }).update);
     expect(stepBase(second, 0)).toBe(80_000_000);
     expect(stepBase(second, 1)).toBe(70_000_000);
+  });
+});
+
+describe('a principal payment elsewhere in the app', () => {
+  const stepped = () => {
+    const p = paidTwo();
+    return merged(p, pay(p).update);
+  };
+
+  it('is not corrected piecemeal', () => {
+    const p = stepped();
+    expect(receiptBlock(p, p.receipts.find((r) => r.id === 'pk1'))).toContain('Batalkan bayar pokok');
+    expect(receiptBlock(p, p.receipts.find((r) => r.id === 'r1'))).toBe(null);
+  });
+
+  it('keeps its effect through a Koreksi modal', () => {
+    const p = stepped();
+    const { update } = applyCapitalCorrection(p, {
+      principalAmount: 110_000_000, disbursedAmount: 94_500_000, sourceAccountId: 'bca', at: due(8),
+    });
+    expect(update.payments.map((r) => r.expectedAmount)).toEqual([6_050_000, 6_050_000, 4_950_000, 4_950_000, 110_000_000]);
+    expect(rowRemaining(merged(p, update), row(update, 5))).toBe(90_000_000);
+    expect(() =>
+      applyCapitalCorrection(p, { principalAmount: 20_000_000, disbursedAmount: 94_500_000, sourceAccountId: 'bca', at: due(8) })
+    ).toThrow('pokok yang sudah dibayar');
+  });
+
+  it('is taken off the pelunasan dipercepat suggestion', () => {
+    // Modal keluar 94,5jt + bagi hasil bulan ini 4,4jt − pokok 20jt yang sudah masuk.
+    expect(settlementSuggestion(stepped(), due(7)).amount).toBe(78_900_000);
   });
 });

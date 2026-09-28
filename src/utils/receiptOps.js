@@ -85,6 +85,11 @@ export function correctionRules(project) {
  * forgive or double-count money. Returns the message, or null.
  */
 export function receiptBlock(project, receipt) {
+  // Bayar sebagian pokok is undone as a whole, never corrected piecemeal:
+  // the bagi hasil it lowered would stay low.
+  if ((project?.principalPayments || []).some((s) => s.id === receipt?.id)) {
+    return 'Ini pembayaran sebagian pokok. Kalau salah, batalkan lewat Batalkan bayar pokok.';
+  }
   const nos = nosOf(receipt);
   const blocked = (project?.payments || []).find(
     (row) => nos.has(row.no) && row.closure && !ownedBy(project, receipt, row.closure)
