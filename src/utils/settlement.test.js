@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { applySettlement, settlementSuggestion } from './settlement';
+import { applySettlement, applySettlementUndo, settlementSuggestion, settlementUndoPreview } from './settlement';
 import { applyExtension } from './extension';
-import { isSettled, projectReceivedTotal } from './paymentStatus';
+import { isSettled, projectReceivedTotal, rowRemaining } from './paymentStatus';
+import { deriveRowFields } from './receiptOps';
+import { toDate } from './formatDate';
 
 // Nilai project 100jt, modal keluar 94,5jt (one month of 5,5% taken up front),
 // three monthly bagi hasil of 5,5jt and the pelunasan in month four.
@@ -341,5 +343,164 @@ describe('settling early after the pelunasan was extended', () => {
     expect(s.shortfall).toBe(0);
     expect(s.principalLeft).toBe(102_500_000);
     expect(s.amount).toBe(102_500_000);
+  });
+});
+
+describe('applySettlementUndo', () => {
+  const at = new Date(2026, 8, 23);
+  const carriedOnto = (project, no, toNo, amount) => ({
+    ...project,
+    payments: project.payments.map((r) => (r.no === no ? { ...r, closure: { kind: 'carry', amount, toNo } } : r)),
+  });
+  // The project as the writer leaves it after a pelunasan dipercepat.
+  const settledWith = (p, amount) => {
+    const out = applySettlement(p, { amount, at, accountId: 'bca', transactionId: 'tx-s' });
+    return { ...p, payments: out.payments, receipts: out.receipts, status: 'completed', closedAt: at, settledEarly: true };
+  };
+  // Rows compared the way the writers store them.
+  const asStored = (p) => deriveRowFields(p.payments, p.receipts);
+
+  it('puts back the rows it removed and takes its money out of receipts', () => {
+    const p = paid(base(), [{ no: 1, amount: 5_500_000 }]);
+    const { update, removed } = applySettlementUndo(settledWith(p, 100_000_000));
+    expect(removed.map((r) => r.id)).toEqual(['tx-s']);
+    expect(update.payments).toEqual(asStored(p));
+    expect(update.receipts).toEqual(p.receipts);
+    expect(update).toMatchObject({ status: 'active', closedAt: null, settledEarly: false });
+  });
+
+  it('opens again a month it closed, which is billed its remainder', () => {
+    const p = paid(base(), [
+      { no: 1, amount: 5_500_000 },
+      { no: 2, amount: 5_500_000 },
+      { no: 3, amount: 3_000_000 },
+    ]);
+    const settled = settledWith(p, 97_000_000);
+    const { update } = applySettlementUndo(settled);
+    expect(update.payments).toEqual(asStored(p));
+    const after = { ...settled, ...update };
+    expect(rowRemaining(after, after.payments.find((r) => r.no === 3))).toBe(2_500_000);
+  });
+
+  it('gives a tunggakan back to the month it was carried onto', () => {
+    const p = carriedOnto(paid(base(), [{ no: 1, amount: 5_500_000 }]), 2, 3, 5_500_000);
+    const { update } = applySettlementUndo(settledWith(p, 105_500_000));
+    expect(update.payments).toEqual(asStored(p));
+  });
+
+  it('removes an edited pelunasan whole', () => {
+    const p = paid(base(), [{ no: 1, amount: 5_500_000 }]);
+    const settled = settledWith(p, 100_000_000);
+    const edited = {
+      ...settled,
+      receipts: settled.receipts.map((r) =>
+        r.id === 'tx-s' ? { ...r, amount: 90_000_000, allocations: [{ no: 2, amount: 90_000_000 }] } : r
+      ),
+    };
+    const { update, removed } = applySettlementUndo(edited);
+    expect(removed.map((r) => r.amount)).toEqual([90_000_000]);
+    expect(update.payments).toEqual(asStored(p));
+  });
+
+  it('rebuilds from the contract a pelunasan recorded before it kept its rows (SAWAH KOTA SISWATI 2)', () => {
+    const d = (month, day) => new Date(2026, month, day);
+    const project = {
+      principalAmount: 320_000_000,
+      disbursedAmount: 302_400_000,
+      monthlyReturnPct: 5.5,
+      returnPctTier1: 5.5,
+      returnPctTier2: 6.5,
+      durationMonths: 3,
+      startDate: d(6, 17),
+      paymentDayOfMonth: 17,
+      status: 'completed',
+      settledEarly: true,
+      closedAt: d(8, 25),
+      payments: [
+        { no: 1, type: 'interest', dueDate: d(7, 17), expectedAmount: 17_600_000, ratePct: 5.5, receivedAmount: 17_600_000 },
+        {
+          no: 3, type: 'final', dueDate: d(9, 17), expectedAmount: 320_000_000, ratePct: null, receivedAmount: 38_000_000,
+          closure: { kind: 'waive', amount: 282_000_000, reason: 'settlement', at: d(8, 25) },
+        },
+        {
+          no: 4, type: 'final', dueDate: d(8, 25), expectedAmount: 282_000_000, ratePct: null,
+          receivedAmount: 282_000_000, settledEarly: true,
+        },
+      ],
+      receipts: [
+        { id: 'legacy-1', amount: 17_600_000, date: d(7, 17), accountId: 'bca', transactionId: 't1', allocations: [{ no: 1, amount: 17_600_000 }] },
+        { id: 'r38', amount: 38_000_000, date: d(8, 20), accountId: 'bca', transactionId: 't38', allocations: [{ no: 3, amount: 38_000_000 }] },
+        { id: 'ts', amount: 282_000_000, date: d(8, 25), accountId: 'bca', transactionId: 'ts', allocations: [{ no: 4, amount: 282_000_000 }] },
+      ],
+    };
+    const { update, removed } = applySettlementUndo(project);
+    expect(removed.map((r) => r.id)).toEqual(['ts']);
+    expect(update.payments.map((r) => r.no)).toEqual([1, 2, 3]);
+    expect(update.payments[1]).toMatchObject({ type: 'interest', expectedAmount: 17_600_000, ratePct: 5.5, receivedAmount: null });
+    expect(toDate(update.payments[1].dueDate)).toEqual(d(8, 17));
+    expect(update.payments[2].closure).toBeUndefined();
+    const after = { ...project, ...update };
+    expect(rowRemaining(after, update.payments[2])).toBe(282_000_000);
+    expect(update).toMatchObject({ status: 'active', closedAt: null, settledEarly: false });
+  });
+
+  it('refuses a project that was not closed by pelunasan dipercepat', () => {
+    expect(() => applySettlementUndo(paid(base(), [{ no: 1, amount: 5_500_000 }]))).toThrow(
+      'tidak ditutup lewat pelunasan dipercepat'
+    );
+  });
+
+  it('refuses to rebuild an old pelunasan once the schedule was extended', () => {
+    const settled = settledWith(paid(base(), [{ no: 1, amount: 5_500_000 }]), 100_000_000);
+    const old = {
+      ...settled,
+      extensions: [{ id: 'e1' }],
+      payments: settled.payments.map((r) => {
+        const row = { ...r };
+        delete row.dropped;
+        return row;
+      }),
+    };
+    expect(() => applySettlementUndo(old)).toThrow('tidak bisa dibatalkan otomatis');
+  });
+
+  it('refuses when the pelunasan money also paid another month', () => {
+    const settled = settledWith(paid(base(), [{ no: 1, amount: 5_500_000 }]), 100_000_000);
+    const odd = {
+      ...settled,
+      receipts: settled.receipts.map((r) =>
+        r.id === 'tx-s' ? { ...r, allocations: [...r.allocations, { no: 1, amount: 1 }] } : r
+      ),
+    };
+    expect(() => applySettlementUndo(odd)).toThrow('juga membayar tagihan lain');
+  });
+});
+
+describe('settlementUndoPreview', () => {
+  const at = new Date(2026, 8, 23);
+
+  it('says what comes back, what is billed again and where the money leaves from', () => {
+    const p = paid(base(), [{ no: 1, amount: 5_500_000 }, { no: 2, amount: 2_000_000 }]);
+    const out = applySettlement(p, { amount: 100_000_000, at, accountId: 'bca', transactionId: 'tx-s' });
+    const settled = { ...p, ...out, status: 'completed', closedAt: at, settledEarly: true };
+    expect(settlementUndoPreview(settled)).toEqual({
+      ok: true,
+      why: null,
+      amount: 100_000_000,
+      accountId: 'bca',
+      status: 'active',
+      restored: [
+        { no: 3, type: 'interest', amount: 5_500_000 },
+        { no: 4, type: 'final', amount: 100_000_000 },
+      ],
+      reopened: [{ no: 2, amount: 3_500_000 }],
+    });
+  });
+
+  it('explains instead of throwing', () => {
+    expect(settlementUndoPreview(base())).toMatchObject({
+      ok: false,
+      why: expect.stringContaining('pelunasan dipercepat'),
+    });
   });
 });

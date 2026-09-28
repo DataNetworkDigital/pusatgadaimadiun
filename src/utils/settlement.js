@@ -1,7 +1,9 @@
-import { isSettled, rowCarriedIn, rowReceived, rowRemaining, rowState } from './paymentStatus';
+import { isSettled, rowCarriedIn, rowDue, rowReceived, rowRemaining, rowState } from './paymentStatus';
 import { normalizeProject } from './normalizeProject';
 import { toDate } from './formatDate';
 import { currentFinal } from './extension';
+import { generateProjectSchedule } from './projectSchedule';
+import { deriveRowFields } from './receiptOps';
 
 /**
  * Pelunasan dipercepat, decided as data. DataContext writes the result.
@@ -180,4 +182,109 @@ export function applySettlement(project, { amount, at, accountId, transactionId 
     receipts: [...(p.receipts || []), receipt],
     settleNo,
   };
+}
+
+const byNo = (a, b) => (Number(a.no) || 0) - (Number(b.no) || 0);
+
+// The rows a pelunasan removed. Kept on its row since 28 Sep 2026; before
+// that they are rebuilt from the contract, which only works while no
+// extension or contract-day row has changed the schedule.
+function droppedRows(project, settleRow, left) {
+  if (Array.isArray(settleRow.dropped)) return settleRow.dropped;
+  const changed = (project.extensions || []).length > 0 || left.some((r) => r.leadCharge);
+  if (changed || !project.startDate) {
+    throw new Error(
+      'Pelunasan ini dicatat sebelum ada tombol batal dan jadwalnya pernah diubah, jadi tidak bisa dibatalkan otomatis.'
+    );
+  }
+  const leftNos = new Set(left.map((r) => r.no));
+  return generateProjectSchedule(project).filter((r) => !leftNos.has(r.no));
+}
+
+/**
+ * Undoing a pelunasan dipercepat, decided as data (spec 2026-09-28 §3).
+ * Everything the pelunasan changed goes back: its money leaves receipts, the
+ * rows it removed return, and what it closed opens again. Reversing its
+ * transaction is DataContext's job.
+ * @returns {{ update, removed, restored }} `removed` are the pelunasan's
+ *          receipts, `restored` the rows brought back.
+ */
+export function applySettlementUndo(project) {
+  const p = normalizeProject(project);
+  if (!p?.settledEarly || p.status !== 'completed') {
+    throw new Error('Project ini tidak ditutup lewat pelunasan dipercepat.');
+  }
+  const settleRow = (p.payments || []).find((r) => r.settledEarly);
+  if (!settleRow) throw new Error('Baris pelunasan dipercepat tidak ditemukan.');
+
+  const removed = (p.receipts || []).filter((r) => (r.allocations || []).some((a) => a.no === settleRow.no));
+  if (!removed.length) throw new Error('Uang pelunasan dipercepat tidak ditemukan.');
+  if (removed.some((r) => r.allocations.some((a) => a.no !== settleRow.no))) {
+    throw new Error('Uang pelunasan dipercepat juga membayar tagihan lain, jadi tidak bisa dibatalkan otomatis.');
+  }
+
+  const left = p.payments.filter((r) => r !== settleRow);
+  const restored = droppedRows(p, settleRow, left);
+  const receipts = (p.receipts || []).filter((r) => !removed.includes(r));
+  const rows = [...left, ...restored].sort(byNo);
+  const measured = { ...p, payments: rows, receipts };
+
+  // What the pelunasan closed opens again. A carry it had turned into a waive
+  // comes back, measured again: a correction since may have changed what the
+  // month lacks.
+  const payments = rows.map((row) => {
+    const c = row.closure;
+    if (c?.kind !== 'waive' || c.reason !== 'settlement') return row;
+    const next = { ...row };
+    delete next.closure;
+    const carry = c.replaced;
+    if (carry?.kind === 'carry' && rows.some((r) => r.no === carry.toNo)) {
+      const lacking = rowDue(row) + rowCarriedIn(measured, row) - rowReceived(measured, row);
+      if (lacking > 0) next.closure = { ...carry, amount: lacking };
+    }
+    return next;
+  });
+
+  const derived = deriveRowFields(payments, receipts);
+  const after = { ...p, payments: derived, receipts };
+  const allSettled = derived.length > 0 && derived.every((row) => isSettled(after, row));
+  return {
+    update: {
+      payments: derived,
+      receipts,
+      status: allSettled ? 'completed' : 'active',
+      closedAt: allSettled ? p.closedAt ?? null : null,
+      settledEarly: false,
+    },
+    removed,
+    restored,
+  };
+}
+
+/**
+ * What undoing the pelunasan would do, for the confirmation. Never throws.
+ * @returns {{ ok, why, amount, accountId, status, restored: [{ no, type, amount }], reopened: [{ no, amount }] }}
+ */
+export function settlementUndoPreview(project) {
+  try {
+    const { update, removed, restored } = applySettlementUndo(project);
+    const after = { ...normalizeProject(project), ...update };
+    const restoredNos = new Set(restored.map((r) => r.no));
+    const left = (row) => rowRemaining(after, row);
+    return {
+      ok: true,
+      why: null,
+      amount: removed.reduce((s, r) => s + (Number(r.amount) || 0), 0),
+      accountId: removed[0].accountId ?? null,
+      status: update.status,
+      restored: update.payments
+        .filter((r) => restoredNos.has(r.no))
+        .map((r) => ({ no: r.no, type: r.type, amount: left(r) })),
+      reopened: update.payments
+        .filter((r) => !restoredNos.has(r.no) && left(r) > 0)
+        .map((r) => ({ no: r.no, amount: left(r) })),
+    };
+  } catch (e) {
+    return { ok: false, why: e.message, amount: 0, accountId: null, status: null, restored: [], reopened: [] };
+  }
 }
