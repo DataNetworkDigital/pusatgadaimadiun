@@ -4,6 +4,7 @@ const TONES = {
   langit: 'bg-langit-soft text-langit',
   emas: 'bg-emas-soft text-emas',
   indigo: 'bg-indigo-soft text-indigo',
+  anak: 'bg-anak-soft text-anak',
   neutral: 'bg-cream-deep text-ink-soft',
 };
 

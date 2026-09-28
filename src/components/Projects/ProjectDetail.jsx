@@ -17,6 +17,7 @@ import SettleProjectSheet from './SettleProjectSheet';
 import ProjectForm from './ProjectForm';
 import CapitalCorrectionSheet from './CapitalCorrectionSheet';
 import PrincipalPaymentSheet from './PrincipalPaymentSheet';
+import AnakSheet from './AnakSheet';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { calcMonthlyInterest, projectSummary } from '../../utils/projectSchedule';
@@ -25,6 +26,7 @@ import { applyReopenRemainder } from '../../utils/remainderOps';
 import { currentFinal, extensionOptions, undoCheck } from '../../utils/extension';
 import { rolloverSource } from '../../utils/rollover';
 import { settlementUndoPreview } from '../../utils/settlement';
+import { anakRatio, anakSummary } from '../../utils/anakShare';
 import { principalPaidBefore, principalPaymentRules, principalUndoCheck, stepBase } from '../../utils/principalPayment';
 import {
   IcChevronLeft,
@@ -348,7 +350,7 @@ export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isDemo } = useDemo();
-  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject, updateProject, correctCapital, recordPrincipalPayment, undoPrincipalPayment } =
+  const { projects, accounts, recordReceipt, updateReceipt, moveReceipt, cancelReceipt, closeRemainder, reopenRemainder, extendProject, undoExtension, rolloverProject, closeProjectAsDefault, settleProjectEarly, undoSettlement, deleteProject, updateProject, correctCapital, recordPrincipalPayment, undoPrincipalPayment, setProjectAnak } =
     useData();
   const [managing, setManaging] = useState(null); // a receipt id, or null when closed
   const [remainderNo, setRemainderNo] = useState(null); // a tagihan number, or null when closed
@@ -367,6 +369,7 @@ export default function ProjectDetail() {
   const [undoingSettlement, setUndoingSettlement] = useState(false);
   const [correctingCapital, setCorrectingCapital] = useState(false);
   const [payingPrincipal, setPayingPrincipal] = useState(false);
+  const [editingAnak, setEditingAnak] = useState(false);
   const [undoingPrincipal, setUndoingPrincipal] = useState(null); // a step id, or null
 
   const base = isDemo ? '/demo' : '';
@@ -408,6 +411,7 @@ export default function ProjectDetail() {
     const final = currentFinal(project);
     return final ? rowRemaining(project, final) : 0;
   })();
+  const anakInfo = anakSummary(project);
   const rollover = rolloverSource(project);
   // Asked once the screen shows the payment that left the pelunasan partly
   // paid (spec 7.2).
@@ -477,6 +481,7 @@ export default function ProjectDetail() {
             {isActive && <Pill tone="indigo">Aktif</Pill>}
             {isCompleted && <Pill tone="daun">Selesai</Pill>}
             {isDefault && <Pill tone="terra">Macet</Pill>}
+            {anakRatio(project) > 0 && <Pill tone="anak">Anak</Pill>}
           </div>
           {project.description && (
             <p className="text-[13px] text-ink-soft mt-1 leading-snug">
@@ -586,6 +591,38 @@ export default function ProjectDetail() {
           <span className="flex-1 text-left">Salah ketik modal? Koreksi modal</span>
           <span>→</span>
         </button>
+      )}
+
+      {anakInfo ? (
+        <button
+          type="button"
+          onClick={() => setEditingAnak(true)}
+          className="w-full text-left mb-3.5 rounded-2xl border border-anak/30 bg-anak-soft px-4 py-3 active:opacity-80"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[13px] font-semibold text-anak">
+              Diambil anak · {formatCurrency(project.anak.amount)} ({Math.round(anakInfo.ratio * 1000) / 10}%)
+            </span>
+            <span className="text-[12px] font-semibold text-anak">Ubah →</span>
+          </div>
+          <div className="text-[12px] text-ink-soft mt-1 leading-snug">
+            Bagi hasil ke anak {formatCurrency(anakInfo.first.net)} per bulan setelah fee Mas Hena{' '}
+            {formatCurrency(anakInfo.first.fee)}
+            {anakInfo.later ? `, mulai bulan 4 ${formatCurrency(anakInfo.later.net)}` : ''}. Saat pelunasan, pokok ke
+            anak {formatCurrency(anakInfo.pokok)}.
+          </div>
+        </button>
+      ) : (
+        !isDefault && (
+          <button
+            type="button"
+            onClick={() => setEditingAnak(true)}
+            className="flex items-center gap-2 w-full px-4 py-3 mb-3.5 bg-paper border border-line rounded-2xl text-[13px] text-anak font-semibold active:bg-cream-deep"
+          >
+            <span className="flex-1 text-left">Tandai diambil anak</span>
+            <span>→</span>
+          </button>
+        )
       )}
 
       {project.proofUrl && (
@@ -777,6 +814,12 @@ export default function ProjectDetail() {
         project={project}
         accounts={accounts}
         onSubmit={(data) => recordPrincipalPayment(project.id, data)}
+      />
+      <AnakSheet
+        open={editingAnak}
+        onClose={() => setEditingAnak(false)}
+        project={project}
+        onSubmit={(data) => setProjectAnak(project.id, data)}
       />
       <ConfirmDialog
         open={undoingPrincipal !== null}

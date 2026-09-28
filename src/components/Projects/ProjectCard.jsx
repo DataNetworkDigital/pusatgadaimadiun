@@ -5,6 +5,7 @@ import { isShort, rowRemaining } from '../../utils/paymentStatus';
 import { formatDate, daysBetween, toDate } from '../../utils/formatDate';
 import { projectSummary, findNextDuePayment } from '../../utils/projectSchedule';
 import Pill from '../common/Pill';
+import { anakRatio } from '../../utils/anakShare';
 import { IcCalendar, IcChevronRight } from '../common/icons';
 
 export default function ProjectCard({ project, index }) {
@@ -21,6 +22,7 @@ export default function ProjectCard({ project, index }) {
   const isActive = project.status === 'active';
   const isDefault = project.status === 'default';
   const isCompleted = project.status === 'completed';
+  const isAnak = anakRatio(project) > 0;
 
   let dueText = null;
   let dueColor = 'text-ink-soft';
@@ -64,7 +66,7 @@ export default function ProjectCard({ project, index }) {
   return (
     <Link
       to={`${base}/project/${project.id}`}
-      className={`block bg-paper rounded-2xl border ${borderClass} shadow-card p-4 active:bg-cream-deep/40 transition`}
+      className={`block ${isAnak ? 'bg-anak-soft' : 'bg-paper'} rounded-2xl border ${borderClass} shadow-card p-4 active:bg-cream-deep/40 transition`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
@@ -80,6 +82,7 @@ export default function ProjectCard({ project, index }) {
             {isActive && <Pill tone="indigo">Aktif</Pill>}
             {isCompleted && <Pill tone="daun">Selesai</Pill>}
             {isDefault && <Pill tone="terra">Macet</Pill>}
+            {isAnak && <Pill tone="anak">Anak</Pill>}
             {isActive && shortfall > 0 && <Pill tone="emas">Kurang {formatCurrency(shortfall, false)}</Pill>}
           </div>
           <div className="text-[12px] text-ink-mute mt-0.5">

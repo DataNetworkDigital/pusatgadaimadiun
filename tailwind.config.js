@@ -14,6 +14,7 @@ export default {
         terra: { DEFAULT: '#B85450', soft: '#F5E4E2' },
         langit: { DEFAULT: '#4A7BA0', soft: '#E4ECF3' },
         emas: { DEFAULT: '#C9952F', soft: '#F7EED8' },
+        anak: { DEFAULT: '#7A5AA6', soft: '#F1EBF8' },
         kayu: '#8B6F47',
 
         // Legacy tokens — kept until all screens migrate
