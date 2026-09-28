@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { formatDate, isSameDay, toDate } from '../../utils/formatDate';
 import { isSettled, rowCarriedIn, rowReceived, rowRemaining } from '../../utils/paymentStatus';
+import { anakFromReceipt, anakFromRow, anakRatio } from '../../utils/anakShare';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { useDemo } from '../../contexts/DemoContext';
 import Card from '../common/Card';
@@ -37,6 +38,16 @@ export default function DayDetail({
       }
     });
   });
+  // Diambil anak: what came in today for the son, and his part of what is due today.
+  const anakIn = [];
+  projects.forEach((p) => {
+    if (!anakRatio(p)) return;
+    const total = (p.receipts || [])
+      .filter((r) => isSameDay(toDate(r.date), date))
+      .reduce((s, r) => s + anakFromReceipt(p, r).total, 0);
+    if (total > 0) anakIn.push({ project: p, total });
+  });
+  const anakDue = dayProjectPayments.reduce((s, { project, payment }) => s + anakFromRow(project, payment).total, 0);
   const empty =
     dayTx.length === 0 &&
     dayDebts.length === 0 &&
@@ -46,6 +57,23 @@ export default function DayDetail({
   return (
     <div>
       <SectionTitle>{formatDate(date)}</SectionTitle>
+      {(anakIn.length > 0 || anakDue > 0) && (
+        <div className="mb-2 rounded-2xl border border-anak/30 bg-anak-soft px-4 py-3 text-[13px] text-ink-soft space-y-1">
+          <div className="font-semibold text-anak">Transfer ke anak</div>
+          {anakIn.map(({ project, total }) => (
+            <div key={project.id} className="flex justify-between gap-2">
+              <span className="truncate">Uang masuk · {project.name}</span>
+              <span className="font-num font-semibold text-ink whitespace-nowrap">{formatCurrency(total)}</span>
+            </div>
+          ))}
+          {anakDue > 0 && (
+            <div className="flex justify-between gap-2">
+              <span>Dari tagihan hari ini, kalau dibayar</span>
+              <span className="font-num font-semibold text-ink whitespace-nowrap">{formatCurrency(anakDue)}</span>
+            </div>
+          )}
+        </div>
+      )}
       <Card className="!px-4 !py-1">
         {empty && (
           <div className="py-6 text-center text-[14px] text-ink-mute">
@@ -66,7 +94,11 @@ export default function DayDetail({
                 : ''
             }`}
           >
-            <div className="w-[42px] h-[42px] rounded-xl bg-indigo-soft text-indigo flex items-center justify-center flex-shrink-0">
+            <div
+              className={`w-[42px] h-[42px] rounded-xl ${
+                anakRatio(project) > 0 ? 'bg-anak-soft text-anak' : 'bg-indigo-soft text-indigo'
+              } flex items-center justify-center flex-shrink-0`}
+            >
               <IcBriefcase size={20} sw={2} />
             </div>
             <div className="flex-1 min-w-0">
@@ -77,6 +109,9 @@ export default function DayDetail({
                 {payment.type === 'final' ? 'Pelunasan' : `Return bulan ${payment.no}`}
                 {rowReceived(project, payment) > 0 ? ' · sisa tagihan' : ''}
                 {rowCarriedIn(project, payment) > 0 ? ' · termasuk tunggakan' : ''}
+                {anakRatio(project) > 0 && (
+                  <span className="text-anak font-semibold"> · ke anak {formatCurrency(anakFromRow(project, payment).total)}</span>
+                )}
               </div>
             </div>
             <div className="text-right">

@@ -1,5 +1,6 @@
 import { DAYS, isSameDay, toDate, monthLabel } from '../../utils/formatDate';
 import { isSettled } from '../../utils/paymentStatus';
+import { anakFromReceipt, anakFromRow, anakRatio } from '../../utils/anakShare';
 import { IcChevronLeft, IcChevronRight } from '../common/icons';
 import Card from '../common/Card';
 
@@ -31,6 +32,7 @@ export default function CalendarGrid({
     let hasDue = false;
     let hasRem = false;
     let hasProject = false;
+    let hasAnak = false;
     transactions.forEach((tx) => {
       if (isSameDay(toDate(tx.date), date)) {
         if (tx.type === 'income') hasInc = true;
@@ -45,6 +47,15 @@ export default function CalendarGrid({
       if (r.isActive && r.dayOfMonth === date.getDate()) hasRem = true;
     });
     projects.forEach((p) => {
+      if (anakRatio(p) > 0) {
+        const due = p.status === 'active' && (p.payments || []).some(
+          (pay) => !isSettled(p, pay) && isSameDay(toDate(pay.dueDate), date) && anakFromRow(p, pay).total > 0
+        );
+        const arrived = (p.receipts || []).some(
+          (r) => isSameDay(toDate(r.date), date) && anakFromReceipt(p, r).total > 0
+        );
+        if (due || arrived) hasAnak = true;
+      }
       if (p.status !== 'active') return;
       (p.payments || []).forEach((pay) => {
         if (!isSettled(p, pay) && isSameDay(toDate(pay.dueDate), date)) {
@@ -52,7 +63,7 @@ export default function CalendarGrid({
         }
       });
     });
-    return { hasInc, hasExp, hasTr, hasDue, hasRem, hasProject };
+    return { hasInc, hasExp, hasTr, hasDue, hasRem, hasProject, hasAnak };
   }
 
   return (
@@ -113,6 +124,7 @@ export default function CalendarGrid({
                 {ind.hasDue && <span className={`${dotBase} ${dotColor('bg-emas')}`} />}
                 {ind.hasRem && <span className={`${dotBase} ${dotColor('bg-emas')}`} />}
                 {ind.hasProject && <span className={`${dotBase} ${dotColor('bg-indigo')}`} />}
+                {ind.hasAnak && <span className={`${dotBase} ${dotColor('bg-anak')}`} />}
               </div>
             </button>
           );
@@ -134,6 +146,9 @@ export default function CalendarGrid({
         </span>
         <span className="flex items-center gap-1">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo" /> Project
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-anak" /> Ke anak
         </span>
       </div>
     </Card>
