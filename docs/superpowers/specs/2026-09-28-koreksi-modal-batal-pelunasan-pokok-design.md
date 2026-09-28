@@ -45,9 +45,9 @@ Firestore allows these shapes (an array inside a map inside an array); `extensio
 6. Receipts: the settlement receipts are removed. Row fields are re-derived (`deriveRowFields`).
 7. Status: `'active'` with `closedAt: null`, or `'completed'` keeping `closedAt` if every row is settled without the pelunasan. `settledEarly: false`.
 
-Returns `{ update, removed }` (`removed` = the settlement receipts).
+Returns `{ update, removed, restored }` (`removed` = the settlement receipts, `restored` = the rows brought back).
 
-`settlementUndoPreview(project)` returns `{ ok, why, amount, accountId, restored: [{ no, type, amount }], reopened: [{ no, amount }] }` for the confirmation text; it never throws.
+`settlementUndoPreview(project)` returns `{ ok, why, amount, accountId, status, restored: [{ no, type, amount }], reopened: [{ no, amount }] }` for the confirmation text; it never throws.
 
 ### 3.3 Writer (`undoSettlement` in DataContext)
 
