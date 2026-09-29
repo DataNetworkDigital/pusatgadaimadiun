@@ -21,6 +21,18 @@ export function keptOnSettlement(project, row) {
   return row?.receivedAmount != null || isSettled(project, row);
 }
 
+// What is left of the principal on the pelunasan, a tunggakan carried onto it
+// left out: the part of a pelunasan dipercepat that brings principal back.
+// Whatever the pelunasan dipercepat asks above it pays bagi hasil.
+export function principalLeftOf(project) {
+  const final = currentFinal(project);
+  if (!final) return 0;
+  return Math.max(
+    0,
+    rowRemaining(project, final) - Math.max(0, rowCarriedIn(project, final) - rowReceived(project, final))
+  );
+}
+
 // The owner's rule: modal keluar plus this month's bagi hasil. On top of that,
 // what a tagihan he has started paying and that is already due is still short,
 // and less any pelunasan money that has already come back. The sheet shows the
@@ -92,13 +104,7 @@ export function settlementSuggestion(project, today = new Date()) {
   // 25 Sep 2026). Like the rule, it leaves out later months nobody has
   // started paying, a tunggakan riding on one included. A project never
   // extended keeps the rule alone.
-  const final = currentFinal(project);
-  const principalLeft = final
-    ? Math.max(
-        0,
-        rowRemaining(project, final) - Math.max(0, rowCarriedIn(project, final) - rowReceived(project, final))
-      )
-    : 0;
+  const principalLeft = principalLeftOf(project);
   const extended = (project?.extensions || []).length > 0;
   const minimum = extended ? principalLeft + shortfall : 0;
 
@@ -125,6 +131,9 @@ export function settlementSuggestion(project, today = new Date()) {
  */
 export function applySettlement(project, { amount, at, accountId, transactionId }) {
   const p = normalizeProject(project);
+  // Measured before the pelunasan closes anything: the son's share reads it
+  // to tell principal from bagi hasil in this money (spec 2026-09-29 §1).
+  const principalLeft = principalLeftOf(p);
 
   const keptRows = (p.payments || []).filter((row) => keptOnSettlement(p, row));
   // What the pelunasan removes stays on its own row, so it can be undone.
@@ -166,6 +175,7 @@ export function applySettlement(project, { amount, at, accountId, transactionId 
     accountId,
     settledEarly: true,
     dropped,
+    principalLeft,
   };
 
   const receipt = {

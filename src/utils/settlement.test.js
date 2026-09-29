@@ -103,6 +103,7 @@ describe('applySettlement', () => {
       accountId: 'bca',
       settledEarly: true,
       dropped: p.payments.filter((r) => r.no !== 1),
+      principalLeft: 100_000_000,
     });
   });
 
@@ -292,6 +293,32 @@ describe('settling after a tunggakan was carried', () => {
   });
 });
 
+describe('the principal a pelunasan dipercepat brings back', () => {
+  const at = new Date(2026, 9, 20);
+  const settleRow = (p, amount) =>
+    applySettlement(p, { amount, at, accountId: 'bca', transactionId: 'tx-s' }).payments.find((r) => r.settledEarly);
+
+  it('is kept on the pelunasan row, a tunggakan it also paid left out', () => {
+    // Bulan 2 carried onto bulan 3: the pelunasan asks 105,5jt, 100jt of it principal.
+    const p0 = paid(base(), [{ no: 1, amount: 5_500_000 }]);
+    const p = {
+      ...p0,
+      payments: p0.payments.map((r) => (r.no === 2 ? { ...r, closure: { kind: 'carry', amount: 5_500_000, toNo: 3 } } : r)),
+    };
+    expect(settleRow(p, 105_500_000).principalLeft).toBe(100_000_000);
+  });
+
+  it('leaves out principal already back on the pelunasan', () => {
+    const p = paid(base(), [{ no: 1, amount: 5_500_000 }, { no: 4, amount: 30_000_000 }]);
+    expect(settleRow(p, 70_000_000).principalLeft).toBe(70_000_000);
+  });
+
+  it('is nothing once the pelunasan had come back in full', () => {
+    const p = paid(base(), [{ no: 1, amount: 5_500_000 }, { no: 4, amount: 100_000_000 }]);
+    expect(settleRow(p, 11_000_000).principalLeft).toBe(0);
+  });
+});
+
 describe('settling early after the pelunasan was extended', () => {
   const today = new Date(2026, 9, 20);
   const at = new Date(2026, 9, 5);
@@ -310,6 +337,12 @@ describe('settling early after the pelunasan was extended', () => {
     expect(s.principalLeft).toBe(70_000_000);
     expect(s.minimum).toBe(70_000_000);
     expect(s.raisedToMinimum).toBe(true);
+  });
+
+  it('keeps on the pelunasan row the principal the extension left', () => {
+    const p = extend(paid(base({ paymentDayOfMonth: 5 }), [...bagiHasil, { no: 4, amount: 30_000_000 }]), 'sisa');
+    const out = applySettlement(p, { amount: 70_000_000, at, accountId: 'bca', transactionId: 'tx-s' });
+    expect(out.payments.find((r) => r.settledEarly).principalLeft).toBe(70_000_000);
   });
 
   it('keeps the owner\'s rule when it asks for more, as after a Mundur', () => {

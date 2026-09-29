@@ -8,7 +8,9 @@ import { calcMonthlyInterest, resolveTiers } from './projectSchedule';
  * Diambil anak (spec 2026-09-29): part of a project, or all of it, belongs to
  * the owner's son. Of every bagi hasil he gets that part, less Mas Hena's fee
  * of `feePct` % a month on it; of every rupiah of principal that comes back,
- * that part. Pure: it only says how much; the transfer happens outside the app.
+ * that part. Mas Hena's fee is shared in proportion, so the son bears it only
+ * on his part (Gde, 29 Sep 2026). Pure: it only says how much; the transfer
+ * happens outside the app.
  */
 
 export const DEFAULT_ANAK_FEE_PCT = 0.5;
@@ -48,8 +50,20 @@ export function anakBagiHasil(project, row, amount) {
 
 const empty = () => ({ bagiHasil: 0, fee: 0, pokok: 0, total: 0 });
 
+// The bagi hasil a pelunasan asks before its principal: a tunggakan carried
+// onto it and, on a pelunasan dipercepat, whatever it asked above the principal
+// that was left (a tunggakan it closed, or a later month's higher rate). One
+// recorded before the pelunasan kept that number counts as principal only.
+function tunggakanOn(p, row) {
+  const left = Number(row.principalLeft);
+  const above = row.settledEarly && row.principalLeft != null && Number.isFinite(left)
+    ? Math.max(0, rowDue(row) - left)
+    : 0;
+  return rowCarriedIn(p, row) + above;
+}
+
 // Adds the son's part of `amount` on `row` to `out`. On a pelunasan the first
-// `tunggakanLeft` rupiah pay a tunggakan carried onto it and are bagi hasil.
+// `tunggakanLeft` rupiah pay bagi hasil (tunggakanOn), the rest principal.
 function addShare(p, row, amount, tunggakanLeft, out) {
   if (row.type === 'final') {
     const tunggakan = Math.max(0, Math.min(amount, tunggakanLeft));
@@ -88,7 +102,7 @@ export function anakFromReceipt(project, receipt) {
   for (const a of receipt.allocations || []) {
     const row = (p.payments || []).find((r) => r.no === a.no);
     if (!row) continue;
-    const tunggakanLeft = row.type === 'final' ? rowCarriedIn(p, row) - (before.get(a.no) || 0) : 0;
+    const tunggakanLeft = row.type === 'final' ? tunggakanOn(p, row) - (before.get(a.no) || 0) : 0;
     addShare(p, row, Number(a.amount) || 0, tunggakanLeft, out);
   }
   out.total = out.bagiHasil + out.pokok;
@@ -100,7 +114,7 @@ export function anakFromRow(project, row) {
   const p = normalizeProject(project);
   const out = empty();
   if (!anakRatio(p) || !row) return out;
-  const tunggakanLeft = row.type === 'final' ? rowCarriedIn(p, row) - rowReceived(p, row) : 0;
+  const tunggakanLeft = row.type === 'final' ? tunggakanOn(p, row) - rowReceived(p, row) : 0;
   addShare(p, row, rowRemaining(p, row), tunggakanLeft, out);
   out.total = out.bagiHasil + out.pokok;
   return out;
