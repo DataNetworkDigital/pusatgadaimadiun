@@ -47,7 +47,12 @@ function rateOf(project, row) {
 // first-tier rate when no month is known.
 function tunggakanRate(project, final) {
   const rows = project?.payments || [];
-  const finals = new Set(rows.filter((r) => r.type === 'final').map((r) => r.no));
+  // Pelunasan rows whose tunggakan the pelunasan dipercepat paid: open, or
+  // closed by it. One closed by Diperpanjang or a Kontrak baru took its
+  // tunggakan into the new principal.
+  const finals = new Set(
+    rows.filter((r) => r.type === 'final' && (!r.closure || r.closure.reason === 'settlement')).map((r) => r.no)
+  );
   let amount = 0;
   let months = 0;
   for (const row of rows) {

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { anakBagiHasil, anakFromReceipt, anakFromRow, anakRatio, anakSummary, cleanAnak } from './anakShare';
 import { applySettlement, settlementSuggestion } from './settlement';
-import { applyReceiptEdit } from './receiptOps';
+import { applyReceiptEdit, deriveRowFields } from './receiptOps';
+import { applyExtension } from './extension';
 
 const due = (month) => new Date(2026, month, 5);
 // Nilai 100jt, 5,5% for months 1-3 and 6,5% after; the son took 50jt.
@@ -79,6 +80,17 @@ describe('anakFromReceipt', () => {
     const whole = receipt('c', [{ no: 4, amount: 106_500_000 }]);
     expect(anakFromReceipt({ ...p, receipts: [whole] }, whole)).toEqual({
       bagiHasil: 3_000_000, fee: 250_000, pokok: 50_000_000, total: 53_000_000,
+    });
+  });
+
+  it('weights the months a tunggakan came from by what each left', () => {
+    // 5,5jt from a 5,5% month and 6,5jt from a 6,5% month: two months of fee.
+    const p = project();
+    p.payments[1] = { ...p.payments[1], closure: { kind: 'carry', amount: 5_500_000, toNo: 4 } };
+    p.payments[2] = { ...p.payments[2], closure: { kind: 'carry', amount: 6_500_000, toNo: 4 } };
+    const r = receipt('all', [{ no: 4, amount: 112_000_000 }]);
+    expect(anakFromReceipt({ ...p, receipts: [r] }, r)).toEqual({
+      bagiHasil: 5_500_000, fee: 500_000, pokok: 50_000_000, total: 55_500_000,
     });
   });
 
@@ -167,6 +179,61 @@ describe('a pelunasan dipercepat on a project taken by the son', () => {
     expect(settlementSuggestion(p, due(8)).amount).toBe(106_500_000);
     const { q, r } = settled(p, 106_500_000);
     expect(anakFromReceipt(q, r)).toEqual({ bagiHasil: 3_000_000, fee: 250_000, pokok: 50_000_000, total: 53_000_000 });
+  });
+
+  // Tiered 5,5 / 5,5 / 6,5, rows left as the writers leave them.
+  const tiered = (receipts, closures) => {
+    const p0 = project({ disbursedAmount: 94_500_000, status: 'active', paymentDayOfMonth: 5 });
+    const payments = p0.payments.map((r) => (closures[r.no] ? { ...r, closure: closures[r.no] } : r));
+    return { ...p0, receipts, payments: deriveRowFields(payments, receipts) };
+  };
+  const bulan3Carried = { kind: 'carry', amount: 6_500_000, toNo: 4 };
+
+  it('leaves out an old shortfall forgiven under the old rule', () => {
+    const p = tiered(
+      [receipt('legacy-1', [{ no: 1, amount: 5_000_000 }]), receipt('b2', [{ no: 2, amount: 5_500_000 }])],
+      { 1: { kind: 'waive', amount: 500_000, reason: 'legacy' }, 3: bulan3Carried }
+    );
+    expect(settlementSuggestion(p, due(8)).amount).toBe(106_500_000);
+    const { q, r } = settled(p, 106_500_000);
+    expect(anakFromReceipt(q, r)).toEqual({ bagiHasil: 3_000_000, fee: 250_000, pokok: 50_000_000, total: 53_000_000 });
+  });
+
+  it('counts a tunggakan still riding on the pelunasan it kept', () => {
+    const f1 = { ...receipt('f1', [{ no: 4, amount: 2_000_000 }]), date: due(8) };
+    const p = tiered(
+      [receipt('b1', [{ no: 1, amount: 5_500_000 }]), receipt('b2', [{ no: 2, amount: 5_500_000 }]), f1],
+      { 3: bulan3Carried }
+    );
+    expect(settlementSuggestion(p, due(8)).amount).toBe(104_500_000);
+    const { q, r } = settled(p, 104_500_000);
+    expect(anakFromReceipt(q, r)).toEqual({ bagiHasil: 2_076_923, fee: 173_077, pokok: 50_000_000, total: 52_076_923 });
+    // With the 2jt that paid part of it earlier, the month's fee comes to 250rb.
+    expect(anakFromReceipt(q, q.receipts.find((x) => x.id === 'f1')).fee).toBe(76_923);
+  });
+
+  it('leaves out a tunggakan that Diperpanjang took into its principal', () => {
+    const at = new Date(2026, 9, 5);
+    const p1 = tiered(
+      [
+        receipt('b1', [{ no: 1, amount: 5_500_000 }]),
+        receipt('b2', [{ no: 2, amount: 5_500_000 }]),
+        { ...receipt('f1', [{ no: 4, amount: 2_000_000 }]), date: due(8) },
+      ],
+      { 3: bulan3Carried }
+    );
+    // The 104,5jt left, 4,5jt of tunggakan in it, extended two months at 7%.
+    const p2 = { ...p1, ...applyExtension(p1, { kind: 'sisa', months: 2, ratePct: 7, startMode: 'today', at, id: 'e1' }).update };
+    const month1 = p2.payments.find((r) => r.extensionId === 'e1' && r.type === 'interest');
+    const x1 = { ...receipt('x1', [{ no: month1.no, amount: 3_000_000 }]), date: at };
+    const receipts = [...p2.receipts, x1];
+    const p3 = { ...p2, receipts, payments: deriveRowFields(p2.payments, receipts) };
+    const out = applySettlement(p3, { amount: 109_500_000, at: new Date(2026, 9, 20), accountId: 'bca', transactionId: 'tx-s' });
+    const q = { ...p3, payments: out.payments, receipts: out.receipts, settledEarly: true, status: 'completed' };
+    // 5jt above the 104,5jt principal, all of it at the extension's 7%.
+    expect(anakFromReceipt(q, q.receipts.find((x) => x.id === 'tx-s'))).toEqual({
+      bagiHasil: 2_321_429, fee: 178_571, pokok: 52_250_000, total: 54_571_429,
+    });
   });
 
   it('counts a pelunasan dipercepat of just the principal as principal', () => {
