@@ -29,14 +29,41 @@ function feePctOf(project) {
 }
 
 // The monthly rate a bagi hasil is asked at, in percent of its principal. A
-// tunggakan carried onto a pelunasan was the bagi hasil of a normal month.
+// tunggakan on a pelunasan is the bagi hasil of the months it came from.
 function rateOf(project, row) {
-  if (row?.type === 'final') return resolveTiers(project).tier1;
+  if (row?.type === 'final') return tunggakanRate(project, row);
   const stored = Number(row?.ratePct);
   if (row?.ratePct != null && Number.isFinite(stored)) return stored;
   const base =
     row?.baseAmount ?? (Number(project?.principalAmount) || 0) - principalPaidBefore(project, row?.no ?? 0);
   return base > 0 ? (rowDue(row) * 100) / base : 0;
+}
+
+// The rate of the bagi hasil a pelunasan holds: that of the months its
+// tunggakan came from, weighted by what each left, so Mas Hena's fee stays
+// feePct % of the son's part a month whatever each month's rate. On a
+// pelunasan dipercepat those are the tunggakan it closed: the ones it turned
+// into its own waivers and the ones still riding on a pelunasan it kept. The
+// first-tier rate when no month is known.
+function tunggakanRate(project, final) {
+  const rows = project?.payments || [];
+  const finals = new Set(rows.filter((r) => r.type === 'final').map((r) => r.no));
+  let amount = 0;
+  let months = 0;
+  for (const row of rows) {
+    const c = row.closure;
+    if (row.type !== 'interest' || !c) continue;
+    const counts = final.settledEarly
+      ? (c.kind === 'waive' && c.reason === 'settlement') || (c.kind === 'carry' && finals.has(c.toNo))
+      : c.kind === 'carry' && c.toNo === final.no;
+    const left = Number(c.amount) || 0;
+    const rate = counts ? rateOf(project, row) : 0;
+    if (left > 0 && rate > 0) {
+      amount += left;
+      months += left / rate;
+    }
+  }
+  return months > 0 ? amount / months : resolveTiers(project).tier1;
 }
 
 /** The son's part of `amount` of bagi hasil on `row`, and Mas Hena's fee taken from it. */

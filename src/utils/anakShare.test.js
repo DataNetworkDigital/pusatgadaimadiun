@@ -65,15 +65,20 @@ describe('anakFromReceipt', () => {
     });
   });
 
-  it('counts a tunggakan carried onto the pelunasan as bagi hasil, paid first', () => {
+  it('counts a tunggakan carried onto the pelunasan as bagi hasil, paid first, at the rate of its month', () => {
+    // Bulan 3 (6,5%) carried: the fee stays 0,5% of the son's 50jt a month.
     const p = project();
     p.payments[2] = { ...p.payments[2], closure: { kind: 'carry', amount: 6_500_000, toNo: 4 } };
     const first = receipt('a', [{ no: 4, amount: 5_000_000 }]);
     const second = receipt('b', [{ no: 4, amount: 101_500_000 }]);
     const q = { ...p, receipts: [first, second] };
-    expect(anakFromReceipt(q, first)).toEqual({ bagiHasil: 2_272_727, fee: 227_273, pokok: 0, total: 2_272_727 });
+    expect(anakFromReceipt(q, first)).toEqual({ bagiHasil: 2_307_692, fee: 192_308, pokok: 0, total: 2_307_692 });
     expect(anakFromReceipt(q, second)).toEqual({
-      bagiHasil: 681_818, fee: 68_182, pokok: 50_000_000, total: 50_681_818,
+      bagiHasil: 692_308, fee: 57_692, pokok: 50_000_000, total: 50_692_308,
+    });
+    const whole = receipt('c', [{ no: 4, amount: 106_500_000 }]);
+    expect(anakFromReceipt({ ...p, receipts: [whole] }, whole)).toEqual({
+      bagiHasil: 3_000_000, fee: 250_000, pokok: 50_000_000, total: 53_000_000,
     });
   });
 
@@ -83,9 +88,9 @@ describe('anakFromReceipt', () => {
     const early = { ...receipt('a', [{ no: 4, amount: 5_000_000 }]), date: due(8) };
     const late = { ...receipt('b', [{ no: 4, amount: 101_500_000 }]), date: due(9) };
     const typedLate = { ...p, receipts: [late, early] };
-    expect(anakFromReceipt(typedLate, early)).toEqual({ bagiHasil: 2_272_727, fee: 227_273, pokok: 0, total: 2_272_727 });
+    expect(anakFromReceipt(typedLate, early)).toEqual({ bagiHasil: 2_307_692, fee: 192_308, pokok: 0, total: 2_307_692 });
     expect(anakFromReceipt(typedLate, late)).toEqual({
-      bagiHasil: 681_818, fee: 68_182, pokok: 50_000_000, total: 50_681_818,
+      bagiHasil: 692_308, fee: 57_692, pokok: 50_000_000, total: 50_692_308,
     });
   });
 
@@ -139,6 +144,31 @@ describe('a pelunasan dipercepat on a project taken by the son', () => {
     expect(anakFromReceipt(q, r)).toEqual({ bagiHasil: 1_000_000, fee: 100_000, pokok: 50_000_000, total: 51_000_000 });
   });
 
+  it('takes the fee from a tunggakan that rode on the pelunasan it replaced', () => {
+    const p0 = flat();
+    const p = {
+      ...p0,
+      receipts: [receipt('b1', [{ no: 1, amount: 5_500_000 }]), receipt('b2', [{ no: 2, amount: 5_500_000 }])],
+      payments: p0.payments.map((r) => (r.no === 3 ? { ...r, closure: { kind: 'carry', amount: 5_500_000, toNo: 4 } } : r)),
+    };
+    expect(settlementSuggestion(p, due(8)).amount).toBe(105_500_000);
+    const { q, r } = settled(p, 105_500_000);
+    expect(anakFromReceipt(q, r)).toEqual({ bagiHasil: 2_500_000, fee: 250_000, pokok: 50_000_000, total: 52_500_000 });
+  });
+
+  it('charges a 6,5% month\'s tunggakan the same 0,5% of the son\'s part a month', () => {
+    // Nilai 100jt at 5,5% then 6,5%: bulan 3 (6,5jt) carried onto the pelunasan.
+    const p0 = project({ disbursedAmount: 94_500_000, status: 'active' });
+    const p = {
+      ...p0,
+      receipts: [receipt('b1', [{ no: 1, amount: 5_500_000 }]), receipt('b2', [{ no: 2, amount: 5_500_000 }])],
+      payments: p0.payments.map((r) => (r.no === 3 ? { ...r, closure: { kind: 'carry', amount: 6_500_000, toNo: 4 } } : r)),
+    };
+    expect(settlementSuggestion(p, due(8)).amount).toBe(106_500_000);
+    const { q, r } = settled(p, 106_500_000);
+    expect(anakFromReceipt(q, r)).toEqual({ bagiHasil: 3_000_000, fee: 250_000, pokok: 50_000_000, total: 53_000_000 });
+  });
+
   it('counts a pelunasan dipercepat of just the principal as principal', () => {
     const p = { ...flat(), receipts: [receipt('b1', [{ no: 1, amount: 5_500_000 }])] };
     const { q, r } = settled(p, 100_000_000);
@@ -182,6 +212,12 @@ describe('anakFromRow', () => {
     const p = project({ receipts: [receipt('r1', [{ no: 1, amount: 2_750_000 }])] });
     expect(anakFromRow(p, p.payments[0])).toEqual({ bagiHasil: 1_250_000, fee: 125_000, pokok: 0, total: 1_250_000 });
     expect(anakFromRow(p, p.payments[3]).pokok).toBe(50_000_000);
+  });
+
+  it('plans a tunggakan riding on the pelunasan at the rate of its month', () => {
+    const p = project();
+    p.payments[2] = { ...p.payments[2], closure: { kind: 'carry', amount: 6_500_000, toNo: 4 } };
+    expect(anakFromRow(p, p.payments[3])).toEqual({ bagiHasil: 3_000_000, fee: 250_000, pokok: 50_000_000, total: 53_000_000 });
   });
 });
 

@@ -11,7 +11,8 @@ Repo: DataNetworkDigital/pusatgadaimadiun (deploys to GitHub Pages on every push
 - Of every rupiah of principal that comes back (the pelunasan, a pelunasan dipercepat, a Bayar sebagian pokok), the son gets his percentage, with no fee.
 - Money on a pelunasan pays a tunggakan carried onto it first (as the pelunasan dipercepat suggestion counts it); that part is bagi hasil.
 - Mas Hena's fee is shared in proportion: the son bears it only on his part (Gde, 29 Sep 2026: "fee mas hena dibagi proporsional").
-- A pelunasan dipercepat brings back, as principal, at most the principal that was left on the pelunasan (a tunggakan carried onto it left out). Whatever it asked above that, a tunggakan it closed or a later month's higher rate, is bagi hasil and carries the fee. Example: 100jt, 50jt the son's, 5,5%; bulan 2 paid 3,3jt with the 2,2jt short carried onto bulan 3, then settled early for 102,2jt: 50jt principal and 1,1jt bagi hasil less a 100rb fee go to the son, 51jt in all.
+- A pelunasan dipercepat brings back, as principal, at most the principal that was left on the pelunasan (a tunggakan carried onto it left out). Whatever it asked above that, a tunggakan it closed or a later month's higher rate, is bagi hasil and carries the fee. When the owner accepts less than the suggestion, the principal is counted first: what he let go is bagi hasil, so the son's principal stays whole.
+- A tunggakan paid on a pelunasan (carried onto it, or closed by a pelunasan dipercepat) carries the fee at the rate of the months it came from, weighted by what each left, so a full 6,5% month still costs 0,5% of the son's part, the same as a 5,5% month. Example: 100jt, 50jt the son's, 5,5%; bulan 2 paid 3,3jt with the 2,2jt short carried onto bulan 3, then settled early for 102,2jt: 50jt principal and 1,1jt bagi hasil less a 100rb fee go to the son, 51jt in all.
 - The app only shows the amounts; the transfer itself happens outside the app and is not recorded.
 - A Kontrak baru made from a project taken by the son keeps the same percentage and fee on the new Nilai Project.
 
@@ -22,7 +23,7 @@ Repo: DataNetworkDigital/pusatgadaimadiun (deploys to GitHub Pages on every push
 ## 3. Calculation (`src/utils/anakShare.js`, pure)
 
 - `anakRatio(project)` = `min(1, anak.amount / principalAmount)`, 0 when not taken.
-- `anakBagiHasil(project, row, amount)` → `{ net, fee }`: gross = amount × ratio; the fee is the part `feePct / rate` of it, where `rate` is the row's `ratePct`, or the rate its amount implies on its base (`baseAmount` for an extension row, principal minus earlier principal payments otherwise); on a pelunasan (a carried tunggakan, or a pelunasan dipercepat's amount above `principalLeft`) the project's first-tier rate. On a pelunasan that bagi hasil is paid before the principal.
+- `anakBagiHasil(project, row, amount)` → `{ net, fee }`: gross = amount × ratio; the fee is the part `feePct / rate` of it, where `rate` is the row's `ratePct`, or the rate its amount implies on its base (`baseAmount` for an extension row, principal minus earlier principal payments otherwise); on a pelunasan (a carried tunggakan, or a pelunasan dipercepat's amount above `principalLeft`) the rate of the bagi hasil rows its tunggakan came from (their carries onto it, or the pelunasan dipercepat's own waivers), weighted by amount; the first-tier rate when none is known. On a pelunasan that bagi hasil is paid before the principal. `principalLeft` is kept as measured at the pelunasan dipercepat; editing an earlier pelunasan payment afterwards does not move it.
 - `anakFromReceipt(project, receipt)` → `{ bagiHasil, fee, pokok, total }` for one arrival of money.
 - `anakFromRow(project, row)` → the same for what is still owed on a tagihan (the calendar's plan).
 

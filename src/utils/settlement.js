@@ -133,7 +133,8 @@ export function applySettlement(project, { amount, at, accountId, transactionId 
   const p = normalizeProject(project);
   // Measured before the pelunasan closes anything: the son's share reads it
   // to tell principal from bagi hasil in this money (spec 2026-09-29 §1).
-  const principalLeft = principalLeftOf(p);
+  // Every schedule ends with a pelunasan; without one nothing is kept.
+  const principalLeft = currentFinal(p) ? { principalLeft: principalLeftOf(p) } : {};
 
   const keptRows = (p.payments || []).filter((row) => keptOnSettlement(p, row));
   // What the pelunasan removes stays on its own row, so it can be undone.
@@ -175,7 +176,7 @@ export function applySettlement(project, { amount, at, accountId, transactionId 
     accountId,
     settledEarly: true,
     dropped,
-    principalLeft,
+    ...principalLeft,
   };
 
   const receipt = {

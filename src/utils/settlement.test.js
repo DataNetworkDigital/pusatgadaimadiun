@@ -298,13 +298,19 @@ describe('the principal a pelunasan dipercepat brings back', () => {
   const settleRow = (p, amount) =>
     applySettlement(p, { amount, at, accountId: 'bca', transactionId: 'tx-s' }).payments.find((r) => r.settledEarly);
 
-  it('is kept on the pelunasan row, a tunggakan it also paid left out', () => {
-    // Bulan 2 carried onto bulan 3: the pelunasan asks 105,5jt, 100jt of it principal.
-    const p0 = paid(base(), [{ no: 1, amount: 5_500_000 }]);
-    const p = {
-      ...p0,
-      payments: p0.payments.map((r) => (r.no === 2 ? { ...r, closure: { kind: 'carry', amount: 5_500_000, toNo: 3 } } : r)),
-    };
+  const carried = (p0, no, toNo) => ({
+    ...p0,
+    payments: p0.payments.map((r) => (r.no === no ? { ...r, closure: { kind: 'carry', amount: 5_500_000, toNo } } : r)),
+  });
+
+  it('is kept on the pelunasan row, a tunggakan carried onto the pelunasan left out', () => {
+    // Bulan 3 carried onto the pelunasan: it asks 105,5jt, 100jt of it principal.
+    const p = carried(paid(base(), [{ no: 1, amount: 5_500_000 }, { no: 2, amount: 5_500_000 }]), 3, 4);
+    expect(settleRow(p, 105_500_000).principalLeft).toBe(100_000_000);
+  });
+
+  it('is the whole principal when the tunggakan rode on a later month', () => {
+    const p = carried(paid(base(), [{ no: 1, amount: 5_500_000 }]), 2, 3);
     expect(settleRow(p, 105_500_000).principalLeft).toBe(100_000_000);
   });
 
@@ -316,6 +322,11 @@ describe('the principal a pelunasan dipercepat brings back', () => {
   it('is nothing once the pelunasan had come back in full', () => {
     const p = paid(base(), [{ no: 1, amount: 5_500_000 }, { no: 4, amount: 100_000_000 }]);
     expect(settleRow(p, 11_000_000).principalLeft).toBe(0);
+  });
+
+  it('is not kept on a schedule without a pelunasan', () => {
+    const p = paid(base({ payments: schedule().filter((r) => r.type !== 'final') }), [{ no: 1, amount: 5_500_000 }]);
+    expect('principalLeft' in settleRow(p, 11_000_000)).toBe(false);
   });
 });
 
